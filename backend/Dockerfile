@@ -7,8 +7,9 @@ WORKDIR /app
 # 复制后端的包管理文件（构建上下文是 backend 目录）
 COPY package*.json ./
 
-# 安装全部依赖（包含 devDependencies 以便编译）
-RUN npm ci
+# 安装全部依赖（包含 devDependencies 以便编译）。
+# 注意：项目未提交 package-lock.json，使用 npm install 而不是 npm ci
+RUN npm install
 
 # 复制后端源码
 COPY . .
