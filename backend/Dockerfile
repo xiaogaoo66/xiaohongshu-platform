@@ -1,39 +1,28 @@
-############################################
-# Builder stage - 安装所有依赖并编译 TypeScript
-############################################
-FROM node:18-alpine AS builder
+# ---------- Builder ----------
+FROM node:18-bullseye-slim AS builder
 WORKDIR /app
 
-# 复制后端的包管理文件（构建上下文是 backend 目录）
-COPY package*.json ./
+# 构建期依赖（Prisma 在 Debian 更稳）
+RUN apt-get update && apt-get install -y openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 
-# 安装全部依赖（包含 devDependencies 以便编译）。
-# 注意：项目未提交 package-lock.json，使用 npm install 而不是 npm ci
+# 利用缓存：先拷贝包文件，再安装依赖（仓库无 lock，用 npm install）
+COPY package*.json ./
 RUN npm install
 
-# 复制后端源码
+# 拷贝源码并生成 Prisma 客户端 + 编译 Nest
 COPY . .
-
-# 生成 Prisma 客户端并编译 NestJS
 RUN npx prisma generate && npm run build
 
-############################################
-# Runtime stage - 仅保留运行所需文件
-############################################
-FROM node:18-alpine AS runtime
+# ---------- Runtime ----------
+FROM node:18-bullseye-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
-# 仅拷贝运行所需的 node_modules（来自 builder）
+# 仅复制运行所需
 COPY --from=builder /app/node_modules ./node_modules
-
-# 拷贝编译产物与必要文件
 COPY --from=builder /app/dist ./dist
 COPY package*.json ./
 COPY prisma ./prisma
 
-# 暴露端口
 EXPOSE 3000
-
-# 运行前执行数据库迁移，然后启动应用
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main.js"]
+CMD ["sh","-c","npx prisma migrate deploy && node dist/main.js"]
