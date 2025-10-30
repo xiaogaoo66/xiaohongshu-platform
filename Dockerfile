@@ -20,7 +20,8 @@ ENV NODE_ENV=production
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY backend/package*.json ./
-COPY backend/prisma ./prisma
+# 从 builder 阶段拷贝 prisma（避免根上下文路径问题）
+COPY --from=builder /app/prisma ./prisma
 
 EXPOSE 3000
 CMD ["sh","-c","npx prisma migrate deploy && node dist/main.js"]
