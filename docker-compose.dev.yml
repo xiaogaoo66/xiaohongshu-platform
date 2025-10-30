@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  # PostgreSQL 数据库
+  postgres:
+    image: postgres:15-alpine
+    container_name: xiaohongshu_postgres_dev
+    environment:
+      POSTGRES_DB: xiaohongshu_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data_dev:/var/lib/postgresql/data
+    networks:
+      - xiaohongshu_network_dev
+
+  # 后端服务（开发模式）
+  backend:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: xiaohongshu_backend_dev
+    environment:
+      DATABASE_URL: "postgresql://postgres:postgres123@postgres:5432/xiaohongshu_db?schema=public"
+      JWT_SECRET: "dev-jwt-secret-key"
+      JWT_EXPIRES_IN: "24h"
+      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID}"
+      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY}"
+      AWS_REGION: "${AWS_REGION:-us-east-1}"
+      AWS_S3_BUCKET: "${AWS_S3_BUCKET}"
+      PORT: 3000
+      NODE_ENV: "development"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    depends_on:
+      - postgres
+    networks:
+      - xiaohongshu_network_dev
+    command: npm run start:dev
+
+  # 前端服务（开发模式）
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: xiaohongshu_frontend_dev
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    networks:
+      - xiaohongshu_network_dev
+    command: npm run dev
+
+volumes:
+  postgres_data_dev:
+
+networks:
+  xiaohongshu_network_dev:
+    driver: bridge

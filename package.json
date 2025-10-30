@@ -1,0 +1,48 @@
+{
+  "name": "video01",
+  "version": "1.0.0",
+  "description": "My Remotion video",
+  "repository": {},
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@remotion/bundler": "^4.0.321",
+    "@remotion/cli": "4.0.321",
+    "@remotion/media-parser": "^4.0.322",
+    "@remotion/renderer": "^4.0.321",
+    "@remotion/tailwind-v4": "4.0.321",
+    "ali-oss": "^6.18.1",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "node-fetch": "^3.3.2",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "remotion": "4.0.321",
+    "tailwindcss": "4.0.0",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "@remotion/eslint-config-flat": "4.0.321",
+    "@types/react": "19.0.0",
+    "@types/web": "0.0.166",
+    "eslint": "9.19.0",
+    "prettier": "3.3.3",
+    "typescript": "5.8.2"
+  },
+  "scripts": {
+    "dev": "remotion studio",
+    "build": "remotion bundle",
+    "upgrade": "remotion upgrade",
+    "lint": "eslint src && tsc",
+    "render-api": "node render-api.js",
+    "render-single": "node render-single.js",
+    "gpu-check": "node gpu-check.js",
+    "start-api": "node video-render-api.js",
+    "test-api": "node test-api-client.js",
+    "test-props": "node props-example.js"
+  },
+  "sideEffects": [
+    "*.css"
+  ]
+}

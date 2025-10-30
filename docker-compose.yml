@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  # PostgreSQL 数据库
+  postgres:
+    image: postgres:15-alpine
+    container_name: xiaohongshu_postgres
+    environment:
+      POSTGRES_DB: xiaohongshu_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - xiaohongshu_network
+
+  # 后端服务
+  backend:
+    build: ./backend
+    container_name: xiaohongshu_backend
+    environment:
+      DATABASE_URL: "postgresql://postgres:postgres123@postgres:5432/xiaohongshu_db?schema=public"
+      JWT_SECRET: "your-super-secret-jwt-key-change-in-production"
+      JWT_EXPIRES_IN: "24h"
+      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID}"
+      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY}"
+      AWS_REGION: "${AWS_REGION:-us-east-1}"
+      AWS_S3_BUCKET: "${AWS_S3_BUCKET}"
+      PORT: 3000
+      NODE_ENV: "production"
+    ports:
+      - "3000:3000"
+    depends_on:
+      - postgres
+    networks:
+      - xiaohongshu_network
+    command: >
+      sh -c "
+        npx prisma migrate deploy &&
+        npm run start:prod
+      "
+
+  # 前端服务
+  frontend:
+    build: ./frontend
+    container_name: xiaohongshu_frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - xiaohongshu_network
+
+volumes:
+  postgres_data:
+
+networks:
+  xiaohongshu_network:
+    driver: bridge
