@@ -47,13 +47,15 @@ const AdminDashboard: React.FC = () => {
   // 获取内容列表
   const { data: contents, isLoading: contentsLoading } = useQuery({
     queryKey: ['adminContents'],
-    queryFn: () => contentAPI.getContents().then(res => res.data),
+    queryFn: () => contentAPI.getContents().then(res => res.data).catch(() => []),
+    retry: false, // 禁用自动重试
   })
 
   // 获取统计信息
   const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ['adminStats'],
-    queryFn: () => contentAPI.getStats().then(res => res.data),
+    queryFn: () => contentAPI.getStats().then(res => res.data).catch(() => ({ total: 0, claimed: 0, unclaimed: 0 })),
+    retry: false, // 禁用自动重试
   })
 
   // 删除内容

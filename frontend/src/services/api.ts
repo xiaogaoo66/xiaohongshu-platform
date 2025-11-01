@@ -35,10 +35,15 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    // 处理 401 未授权错误
     if (error.response?.status === 401) {
       localStorage.removeItem('admin_token')
-      window.location.href = '/admin/login'
+      // 避免在已经登录页面时重定向
+      if (!window.location.pathname.includes('/admin/login')) {
+        window.location.href = '/admin/login'
+      }
     }
+    // 确保所有错误都被正确捕获，避免未捕获的异常
     return Promise.reject(error)
   }
 )
