@@ -96,11 +96,45 @@ const AdminDashboard: React.FC = () => {
   const handleImageUpload = async (file: File) => {
     try {
       setUploading(true)
+      
+      // 检查文件大小（5MB）
+      if (file.size > 5 * 1024 * 1024) {
+        message.error('图片大小不能超过5MB')
+        return
+      }
+
       const response = await uploadAPI.getPresignedUrl(file.name, file.type)
-      const { presignedUrl, url } = response.data
+      
+      if (!response.data) {
+        throw new Error('服务器未返回有效的上传地址')
+      }
+      
+      const { presignedUrl, url, useBase64 } = response.data
+      
+      // 如果后端返回 useBase64，使用 Base64 编码（临时方案）
+      if (useBase64 || !presignedUrl) {
+        // 转换为 Base64
+        const reader = new FileReader()
+        reader.onload = (e) => {
+          const base64String = e.target?.result as string
+          setSelectedImages(prev => [...prev, base64String])
+          message.success('图片上传成功（使用 Base64 编码）')
+          setUploading(false)
+        }
+        reader.onerror = () => {
+          message.error('图片读取失败')
+          setUploading(false)
+        }
+        reader.readAsDataURL(file)
+        return
+      }
+      
+      if (!presignedUrl || !url) {
+        throw new Error('上传地址格式不正确')
+      }
       
       // 上传到S3
-      await fetch(presignedUrl, {
+      const uploadResponse = await fetch(presignedUrl, {
         method: 'PUT',
         body: file,
         headers: {
@@ -108,10 +142,16 @@ const AdminDashboard: React.FC = () => {
         },
       })
 
+      if (!uploadResponse.ok) {
+        throw new Error(`上传失败: ${uploadResponse.status} ${uploadResponse.statusText}`)
+      }
+
       setSelectedImages(prev => [...prev, url])
       message.success('图片上传成功')
-    } catch (error) {
-      message.error('图片上传失败')
+    } catch (error: any) {
+      console.error('图片上传错误:', error)
+      const errorMessage = error.response?.data?.message || error.message || '图片上传失败'
+      message.error(errorMessage)
     } finally {
       setUploading(false)
     }
