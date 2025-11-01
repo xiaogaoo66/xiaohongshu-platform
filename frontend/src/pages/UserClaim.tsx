@@ -16,8 +16,9 @@ const UserClaim: React.FC = () => {
   // 获取剩余内容数量
   const { data: contentCount, isLoading: countLoading } = useQuery({
     queryKey: ['contentCount'],
-    queryFn: () => contentAPI.getContentCount().then(res => res.data),
+    queryFn: () => contentAPI.getContentCount().then(res => res.data).catch(() => ({ count: 0 })),
     refetchInterval: 5000, // 每5秒刷新一次
+    retry: false, // 禁用自动重试，避免频繁请求
   })
 
   // 领取内容

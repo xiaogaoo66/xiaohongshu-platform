@@ -1,10 +1,20 @@
 import axios from 'axios'
 
+// 获取 API 基础地址，如果未设置环境变量，使用相对路径
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
+
+// 如果是相对路径且没有协议，说明是生产环境但环境变量未设置
+if (API_BASE_URL === '/api') {
+  console.warn('警告: VITE_API_BASE_URL 环境变量未设置，使用相对路径 /api')
+}
 
 const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 10000,
+  // 添加请求配置，防止 CORS 错误
+  headers: {
+    'Content-Type': 'application/json',
+  },
 })
 
 // 请求拦截器 - 添加认证token
