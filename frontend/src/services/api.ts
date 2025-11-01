@@ -1,10 +1,18 @@
 import axios from 'axios'
 
 // 获取 API 基础地址，如果未设置环境变量，使用相对路径
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
+let API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
 
-// 如果是相对路径且没有协议，说明是生产环境但环境变量未设置
-if (API_BASE_URL === '/api') {
+// 确保 API_BASE_URL 以 /api 结尾（如果设置了完整 URL）
+if (API_BASE_URL.startsWith('http')) {
+  // 如果是完整的 URL（包含协议），确保以 /api 结尾
+  if (!API_BASE_URL.endsWith('/api')) {
+    API_BASE_URL = API_BASE_URL.endsWith('/') 
+      ? `${API_BASE_URL}api` 
+      : `${API_BASE_URL}/api`
+  }
+} else if (API_BASE_URL === '/api') {
+  // 相对路径，已经是 /api，不需要修改
   console.warn('警告: VITE_API_BASE_URL 环境变量未设置，使用相对路径 /api')
 }
 
@@ -20,11 +28,17 @@ const api = axios.create({
 // 请求拦截器 - 添加认证token
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('admin_token')
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`
+    try {
+      const token = localStorage.getItem('admin_token')
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`
+      }
+      return config
+    } catch (error) {
+      // 如果 localStorage 访问失败，继续请求但不添加 token
+      console.warn('无法访问 localStorage:', error)
+      return config
     }
-    return config
   },
   (error) => {
     return Promise.reject(error)
