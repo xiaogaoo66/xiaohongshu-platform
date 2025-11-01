@@ -14,12 +14,15 @@ const UserClaim: React.FC = () => {
   const queryClient = useQueryClient()
 
   // 获取剩余内容数量
-  const { data: contentCount, isLoading: countLoading } = useQuery({
+  const { data: contentCountData, isLoading: countLoading } = useQuery({
     queryKey: ['contentCount'],
     queryFn: () => contentAPI.getContentCount().then(res => res.data).catch(() => ({ count: 0 })),
     refetchInterval: 5000, // 每5秒刷新一次
     retry: false, // 禁用自动重试，避免频繁请求
   })
+  
+  // 从返回的对象中提取 count，兼容可能的数字格式
+  const contentCount = typeof contentCountData === 'number' ? contentCountData : (contentCountData?.count || 0)
 
   // 领取内容
   const claimMutation = useMutation({

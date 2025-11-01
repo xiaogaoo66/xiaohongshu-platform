@@ -65,9 +65,10 @@ export class ContentService {
   }
 
   async getCount() {
-    return this.prisma.content.count({
+    const count = await this.prisma.content.count({
       where: { isClaimed: false },
     });
+    return { count };
   }
 
   async getStats() {
