@@ -72,7 +72,7 @@ api.interceptors.response.use(
         }
       }
       // 记录错误信息（仅在开发环境）
-      if (process.env.NODE_ENV === 'development') {
+      if (import.meta.env.DEV) {
         console.error('API 错误:', {
           url: error.config?.url,
           status: error.response?.status,
