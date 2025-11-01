@@ -13,8 +13,8 @@ export class ContentService {
   }
 
   async findAll() {
+    // 领取后会自动删除，所以所有记录都是未领取的
     return this.prisma.content.findMany({
-      where: { isClaimed: false },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -39,48 +39,44 @@ export class ContentService {
   }
 
   async claimRandom() {
-    // 使用事务确保原子性操作
+    // 使用事务确保原子性操作（查找并删除）
     return this.prisma.$transaction(async (tx) => {
-      // 查找一条未领取的随机记录并锁定
+      // 查找一条记录（领取后会自动删除，所以所有记录都是可领取的）
       const content = await tx.content.findFirst({
-        where: { isClaimed: false },
-        orderBy: { createdAt: 'asc' }, // 可以改为随机排序
+        orderBy: { createdAt: 'asc' }, // 按创建时间排序，最早创建的优先
       });
 
       if (!content) {
         throw new NotFoundException('没有可领取的内容');
       }
 
-      // 更新为已领取状态
-      const updatedContent = await tx.content.update({
+      // 先保存要返回的内容
+      const contentToReturn = { ...content };
+      
+      // 立即删除记录（领取后自动删除）
+      await tx.content.delete({
         where: { id: content.id },
-        data: {
-          isClaimed: true,
-          claimedAt: new Date(),
-        },
       });
 
-      return updatedContent;
+      return contentToReturn;
     });
   }
 
   async getCount() {
-    const count = await this.prisma.content.count({
-      where: { isClaimed: false },
-    });
+    // 领取后会自动删除，所以直接统计总数即可
+    const count = await this.prisma.content.count();
     return { count };
   }
 
   async getStats() {
+    // 由于领取后会自动删除，所以总内容数 = 未领取数
     const total = await this.prisma.content.count();
-    const claimed = await this.prisma.content.count({
-      where: { isClaimed: true },
-    });
-    const unclaimed = total - claimed;
-
+    const unclaimed = total;
+    
+    // 已领取的内容会被删除，无法统计
     return {
       total,
-      claimed,
+      claimed: 0, // 已领取的内容已被删除，无法统计
       unclaimed,
     };
   }
