@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import { Button, Card, Image, message, Spin, Typography, Space, Statistic, Row, Col } from 'antd'
 import { DownloadOutlined, CopyOutlined, GiftOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -48,7 +48,7 @@ const UserClaim: React.FC = () => {
     }
   }
 
-  const handleDownloadImage = (imageUrl: string, index: number) => {
+  const handleDownloadImage = (imageUrl: string) => {
     // 在新标签页中打开图片，用户可以右键保存
     window.open(imageUrl, '_blank')
   }
@@ -57,7 +57,7 @@ const UserClaim: React.FC = () => {
     if (claimedContent?.images) {
       claimedContent.images.forEach((imageUrl, index) => {
         setTimeout(() => {
-          handleDownloadImage(imageUrl, index)
+          handleDownloadImage(imageUrl)
         }, index * 500) // 延迟下载避免浏览器阻止
       })
     }
@@ -133,7 +133,7 @@ const UserClaim: React.FC = () => {
                     top: '8px',
                     right: '8px',
                   }}
-                  onClick={() => handleDownloadImage(imageUrl, index)}
+                  onClick={() => handleDownloadImage(imageUrl)}
                 />
               </div>
             ))}

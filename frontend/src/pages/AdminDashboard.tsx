@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import {
   Layout,
   Card,
@@ -12,8 +12,6 @@ import {
   Space,
   Typography,
   Statistic,
-  Row,
-  Col,
   Image,
   Popconfirm,
   Tag,
@@ -31,7 +29,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { contentAPI, uploadAPI } from '../services/api'
-import { Content as ContentType, Stats } from '../types'
+import { Content as ContentType } from '../types'
 import './AdminDashboard.css'
 
 const { Header, Content, Sider } = Layout
@@ -97,9 +95,10 @@ const AdminDashboard: React.FC = () => {
     try {
       setUploading(true)
       const response = await uploadAPI.getPresignedUrl(file.name, file.type)
+      const { presignedUrl, url } = response.data
       
       // 上传到S3
-      await fetch(response.presignedUrl, {
+      await fetch(presignedUrl, {
         method: 'PUT',
         body: file,
         headers: {
@@ -107,7 +106,7 @@ const AdminDashboard: React.FC = () => {
         },
       })
 
-      setSelectedImages(prev => [...prev, response.url])
+      setSelectedImages(prev => [...prev, url])
       message.success('图片上传成功')
     } catch (error) {
       message.error('图片上传失败')
@@ -194,7 +193,7 @@ const AdminDashboard: React.FC = () => {
       title: '操作',
       key: 'action',
       width: 100,
-      render: (_, record: ContentType) => (
+      render: (_: unknown, record: ContentType) => (
         <Space>
           <Button
             type="text"
