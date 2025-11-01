@@ -47,15 +47,41 @@ api.interceptors.request.use(
 
 // 响应拦截器 - 处理错误
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // 确保响应格式正确
+    try {
+      return response
+    } catch (error) {
+      console.error('响应处理错误:', error)
+      return response
+    }
+  },
   (error) => {
-    // 处理 401 未授权错误
-    if (error.response?.status === 401) {
-      localStorage.removeItem('admin_token')
-      // 避免在已经登录页面时重定向
-      if (!window.location.pathname.includes('/admin/login')) {
-        window.location.href = '/admin/login'
+    // 统一处理所有错误，避免未捕获的异常
+    try {
+      // 处理 401 未授权错误
+      if (error.response?.status === 401) {
+        try {
+          localStorage.removeItem('admin_token')
+        } catch (e) {
+          console.warn('无法访问 localStorage:', e)
+        }
+        // 避免在已经登录页面时重定向
+        if (typeof window !== 'undefined' && !window.location.pathname.includes('/admin/login')) {
+          window.location.href = '/admin/login'
+        }
       }
+      // 记录错误信息（仅在开发环境）
+      if (process.env.NODE_ENV === 'development') {
+        console.error('API 错误:', {
+          url: error.config?.url,
+          status: error.response?.status,
+          message: error.message,
+        })
+      }
+    } catch (e) {
+      // 即使错误处理本身出错，也要确保返回 reject
+      console.error('错误处理失败:', e)
     }
     // 确保所有错误都被正确捕获，避免未捕获的异常
     return Promise.reject(error)

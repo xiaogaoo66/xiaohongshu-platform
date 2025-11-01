@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useMemo } from 'react'
 import { Button, Card, Image, message, Spin, Typography, Space, Statistic, Row, Col } from 'antd'
 import { DownloadOutlined, CopyOutlined, GiftOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -14,15 +14,37 @@ const UserClaim: React.FC = () => {
   const queryClient = useQueryClient()
 
   // 获取剩余内容数量
-  const { data: contentCountData, isLoading: countLoading } = useQuery({
+  const { data: contentCountData, isLoading: countLoading, error: countError } = useQuery({
     queryKey: ['contentCount'],
-    queryFn: () => contentAPI.getContentCount().then(res => res.data).catch(() => ({ count: 0 })),
+    queryFn: async () => {
+      try {
+        const response = await contentAPI.getContentCount()
+        // 确保返回的数据格式正确
+        if (response?.data) {
+          return response.data
+        }
+        return { count: 0 }
+      } catch (error: any) {
+        // 静默处理错误，返回默认值
+        console.warn('获取内容数量失败:', error)
+        return { count: 0 }
+      }
+    },
     refetchInterval: 5000, // 每5秒刷新一次
     retry: false, // 禁用自动重试，避免频繁请求
+    // 即使查询失败也继续使用默认值
+    staleTime: 1000,
   })
   
   // 从返回的对象中提取 count，兼容可能的数字格式
-  const contentCount = typeof contentCountData === 'number' ? contentCountData : (contentCountData?.count || 0)
+  const contentCount = useMemo(() => {
+    if (countError) return 0
+    if (typeof contentCountData === 'number') return contentCountData
+    if (contentCountData && typeof contentCountData === 'object') {
+      return (contentCountData as any)?.count || 0
+    }
+    return 0
+  }, [contentCountData, countError])
 
   // 领取内容
   const claimMutation = useMutation({
