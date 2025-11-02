@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react'
-import { Button, Card, Image, message, Spin, Typography, Space, Statistic, Row, Col } from 'antd'
-import { DownloadOutlined, CopyOutlined, GiftOutlined, ReloadOutlined } from '@ant-design/icons'
+import { Button, Card, Image, message, Spin, Typography, Statistic, Row, Col } from 'antd'
+import { CopyOutlined, GiftOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { contentAPI } from '../services/api'
 import { Content } from '../types'
@@ -74,20 +74,6 @@ const UserClaim: React.FC = () => {
     }
   }
 
-  const handleDownloadImage = (imageUrl: string) => {
-    // 在新标签页中打开图片，用户可以右键保存
-    window.open(imageUrl, '_blank')
-  }
-
-  const handleDownloadAll = () => {
-    if (claimedContent?.images) {
-      claimedContent.images.forEach((imageUrl, index) => {
-        setTimeout(() => {
-          handleDownloadImage(imageUrl)
-        }, index * 500) // 延迟下载避免浏览器阻止
-      })
-    }
-  }
 
   if (countLoading) {
     return (
@@ -117,7 +103,7 @@ const UserClaim: React.FC = () => {
               title="今日已领取"
               value={Math.floor(Math.random() * 50) + 10} // 模拟数据
               valueStyle={{ color: '#fff' }}
-              prefix={<DownloadOutlined />}
+              prefix={<GiftOutlined />}
             />
           </Col>
           <Col span={8}>
@@ -141,27 +127,13 @@ const UserClaim: React.FC = () => {
           {/* 图片展示 */}
           <div className="claim-images">
             {claimedContent.images.map((imageUrl, index) => (
-              <div key={index} style={{ position: 'relative' }}>
-                <Image
-                  src={imageUrl}
-                  alt={`内容图片 ${index + 1}`}
-                  className="claim-image"
-                  preview={{
-                    mask: <DownloadOutlined />,
-                  }}
-                />
-                <Button
-                  type="primary"
-                  icon={<DownloadOutlined />}
-                  size="small"
-                  style={{
-                    position: 'absolute',
-                    top: '8px',
-                    right: '8px',
-                  }}
-                  onClick={() => handleDownloadImage(imageUrl)}
-                />
-              </div>
+              <Image
+                key={index}
+                src={imageUrl}
+                alt={`内容图片 ${index + 1}`}
+                className="claim-image"
+                preview={true}
+              />
             ))}
           </div>
 
@@ -180,15 +152,7 @@ const UserClaim: React.FC = () => {
           </div>
 
           {/* 操作按钮 */}
-          <Space size="large" style={{ width: '100%', justifyContent: 'center' }}>
-            <Button
-              type="primary"
-              size="large"
-              icon={<DownloadOutlined />}
-              onClick={handleDownloadAll}
-            >
-              下载所有图片
-            </Button>
+          <div style={{ textAlign: 'center', marginTop: '24px' }}>
             <Button
               size="large"
               icon={<ReloadOutlined />}
@@ -196,7 +160,7 @@ const UserClaim: React.FC = () => {
             >
               继续领取
             </Button>
-          </Space>
+          </div>
         </Card>
       ) : (
         // 领取按钮
@@ -241,7 +205,8 @@ const UserClaim: React.FC = () => {
         <ul style={{ textAlign: 'left', lineHeight: '1.8' }}>
           <li>每次只能领取一组内容，包含多张图片和对应文案</li>
           <li>领取后的内容会自动从系统中删除，确保唯一性</li>
-          <li>支持图片预览、下载和文案一键复制功能</li>
+          <li>点击图片可以放大预览，长按图片可以保存到手机</li>
+          <li>支持文案一键复制功能</li>
           <li>同一IP地址10秒内只能领取一次，防止恶意刷取</li>
           <li>内容仅供个人学习使用，请勿用于商业用途</li>
         </ul>
