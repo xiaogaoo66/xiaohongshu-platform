@@ -103,6 +103,7 @@ export const contentAPI = {
     api.post('/admin/content', data),
   getContents: () => api.get('/admin/content'),
   deleteContent: (id: string) => api.delete(`/admin/content/${id}`),
+  batchDeleteContent: (ids: string[]) => api.post('/admin/content/batch-delete', { ids }),
   getStats: () => api.get('/admin/stats'),
   
   // 用户接口

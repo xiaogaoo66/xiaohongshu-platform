@@ -38,6 +38,29 @@ export class ContentService {
     });
   }
 
+  async batchRemove(ids: string[]) {
+    if (!ids || ids.length === 0) {
+      throw new Error('请提供要删除的内容ID数组');
+    }
+    
+    try {
+      const result = await this.prisma.content.deleteMany({
+        where: {
+          id: {
+            in: ids,
+          },
+        },
+      });
+
+      return {
+        deletedCount: result.count,
+        message: `成功删除 ${result.count} 条内容`,
+      };
+    } catch (error) {
+      throw new Error(`批量删除失败: ${error.message}`);
+    }
+  }
+
   async claimRandom() {
     // 使用事务确保原子性操作（查找并删除）
     return this.prisma.$transaction(async (tx) => {

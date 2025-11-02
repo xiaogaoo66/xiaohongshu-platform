@@ -29,3 +29,5 @@ model Content {
 
   @@map("contents")
 }
+
+

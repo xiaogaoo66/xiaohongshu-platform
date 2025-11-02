@@ -21,3 +21,5 @@ EXPOSE 3000
 
 # 开发模式启动命令
 CMD ["npm", "run", "start:dev"]
+
+

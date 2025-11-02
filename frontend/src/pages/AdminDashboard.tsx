@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useRef } from 'react'
 import {
   Layout,
   Card,
@@ -16,7 +16,7 @@ import {
   Popconfirm,
   Tag,
   Divider,
-} from 'antd'
+}
 import {
   PlusOutlined,
   UploadOutlined,
@@ -41,6 +41,8 @@ const AdminDashboard: React.FC = () => {
   const [uploadForm] = Form.useForm()
   const [selectedImages, setSelectedImages] = useState<string[]>([])
   const [uploading, setUploading] = useState(false)
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
+  const processedFilesRef = useRef<Set<string>>(new Set())
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
@@ -71,6 +73,20 @@ const AdminDashboard: React.FC = () => {
     },
   })
 
+  // 批量删除内容
+  const batchDeleteMutation = useMutation({
+    mutationFn: (ids: string[]) => contentAPI.batchDeleteContent(ids),
+    onSuccess: () => {
+      message.success(`成功删除 ${selectedRowKeys.length} 条内容`)
+      setSelectedRowKeys([])
+      queryClient.invalidateQueries({ queryKey: ['adminContents'] })
+      queryClient.invalidateQueries({ queryKey: ['adminStats'] })
+    },
+    onError: () => {
+      message.error('批量删除失败')
+    },
+  })
+
   // 创建内容
   const createMutation = useMutation({
     mutationFn: (data: { images: string[]; caption: string }) =>
@@ -80,6 +96,7 @@ const AdminDashboard: React.FC = () => {
       setIsUploadModalVisible(false)
       uploadForm.resetFields()
       setSelectedImages([])
+      processedFilesRef.current.clear()
       queryClient.invalidateQueries({ queryKey: ['adminContents'] })
       queryClient.invalidateQueries({ queryKey: ['adminStats'] })
     },
@@ -93,68 +110,83 @@ const AdminDashboard: React.FC = () => {
     navigate('/admin/login')
   }
 
-  const handleImageUpload = async (file: File) => {
+  // 批量上传图片
+  const handleBatchImageUpload = async (fileList: File[]) => {
     try {
       setUploading(true)
       
-      // 检查文件大小（5MB）
-      if (file.size > 5 * 1024 * 1024) {
-        message.error('图片大小不能超过5MB')
+      // 检查总数限制
+      const remainingSlots = 9 - selectedImages.length
+      if (fileList.length > remainingSlots) {
+        message.warning(`最多只能上传9张图片，已选择 ${selectedImages.length} 张，还可以上传 ${remainingSlots} 张`)
         return
       }
 
-      const response = await uploadAPI.getPresignedUrl(file.name, file.type)
-      
-      if (!response.data) {
-        throw new Error('服务器未返回有效的上传地址')
-      }
-      
-      const { presignedUrl, url, useBase64 } = response.data
-      
-      // 如果后端返回 useBase64，使用 Base64 编码（临时方案）
-      if (useBase64 || !presignedUrl) {
-        // 转换为 Base64
-        const reader = new FileReader()
-        reader.onload = (e) => {
-          const base64String = e.target?.result as string
-          setSelectedImages(prev => [...prev, base64String])
-          message.success('图片上传成功（使用 Base64 编码）')
-          setUploading(false)
-        }
-        reader.onerror = () => {
-          message.error('图片读取失败')
-          setUploading(false)
-        }
-        reader.readAsDataURL(file)
+      // 检查每张图片大小
+      const invalidFiles = fileList.filter(file => file.size > 5 * 1024 * 1024)
+      if (invalidFiles.length > 0) {
+        message.error(`有 ${invalidFiles.length} 张图片超过5MB限制`)
         return
       }
-      
-      if (!presignedUrl || !url) {
-        throw new Error('上传地址格式不正确')
-      }
-      
-      // 上传到S3
-      const uploadResponse = await fetch(presignedUrl, {
-        method: 'PUT',
-        body: file,
-        headers: {
-          'Content-Type': file.type,
-        },
+
+      // 批量处理上传
+      const uploadPromises = fileList.map(async (file) => {
+        const response = await uploadAPI.getPresignedUrl(file.name, file.type)
+        
+        if (!response.data) {
+          throw new Error('服务器未返回有效的上传地址')
+        }
+        
+        const { presignedUrl, url, useBase64 } = response.data
+        
+        // 如果后端返回 useBase64，使用 Base64 编码（临时方案）
+        if (useBase64 || !presignedUrl) {
+          return new Promise<string>((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onload = (e) => {
+              const base64String = e.target?.result as string
+              resolve(base64String)
+            }
+            reader.onerror = () => reject(new Error('图片读取失败'))
+            reader.readAsDataURL(file)
+          })
+        }
+        
+        if (!presignedUrl || !url) {
+          throw new Error('上传地址格式不正确')
+        }
+        
+        // 上传到S3
+        const uploadResponse = await fetch(presignedUrl, {
+          method: 'PUT',
+          body: file,
+          headers: {
+            'Content-Type': file.type,
+          },
+        })
+
+        if (!uploadResponse.ok) {
+          throw new Error(`上传失败: ${uploadResponse.status} ${uploadResponse.statusText}`)
+        }
+
+        return url
       })
 
-      if (!uploadResponse.ok) {
-        throw new Error(`上传失败: ${uploadResponse.status} ${uploadResponse.statusText}`)
-      }
-
-      setSelectedImages(prev => [...prev, url])
-      message.success('图片上传成功')
+      const uploadedUrls = await Promise.all(uploadPromises)
+      setSelectedImages(prev => [...prev, ...uploadedUrls])
+      message.success(`成功上传 ${uploadedUrls.length} 张图片`)
     } catch (error: any) {
-      console.error('图片上传错误:', error)
+      console.error('批量图片上传错误:', error)
       const errorMessage = error.response?.data?.message || error.message || '图片上传失败'
       message.error(errorMessage)
     } finally {
       setUploading(false)
     }
+  }
+
+  // 单个图片上传（保持向后兼容）
+  const handleImageUpload = async (file: File) => {
+    await handleBatchImageUpload([file])
   }
 
   const handleRemoveImage = (index: number) => {
@@ -169,6 +201,25 @@ const AdminDashboard: React.FC = () => {
     createMutation.mutate({
       images: selectedImages,
       caption: values.caption,
+    })
+  }
+
+  // 处理批量删除
+  const handleBatchDelete = () => {
+    if (selectedRowKeys.length === 0) {
+      message.warning('请至少选择一条要删除的内容')
+      return
+    }
+
+    Modal.confirm({
+      title: '确认批量删除',
+      content: `确定要删除选中的 ${selectedRowKeys.length} 条内容吗？此操作不可恢复！`,
+      okText: '确定删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: () => {
+        batchDeleteMutation.mutate(selectedRowKeys as string[])
+      },
     })
   }
 
@@ -364,12 +415,47 @@ const AdminDashboard: React.FC = () => {
         </Sider>
 
         <Content className="admin-content">
-          <Card title="📋 内容列表" className="content-list-card">
+          <Card 
+            title="📋 内容列表" 
+            className="content-list-card"
+            extra={
+              selectedRowKeys.length > 0 && (
+                <Popconfirm
+                  title={`确定要删除选中的 ${selectedRowKeys.length} 条内容吗？`}
+                  onConfirm={handleBatchDelete}
+                  okText="确定"
+                  cancelText="取消"
+                  okType="danger"
+                >
+                  <Button
+                    type="primary"
+                    danger
+                    icon={<DeleteOutlined />}
+                    loading={batchDeleteMutation.isPending}
+                  >
+                    批量删除 ({selectedRowKeys.length})
+                  </Button>
+                </Popconfirm>
+              )
+            }
+          >
             <Table
               columns={columns}
               dataSource={contents}
               loading={contentsLoading}
               rowKey="id"
+              rowSelection={{
+                selectedRowKeys,
+                onChange: setSelectedRowKeys,
+                onSelectAll: (selected, selectedRows, changeRows) => {
+                  if (selected) {
+                    const allKeys = selectedRows.map(row => row.id)
+                    setSelectedRowKeys(allKeys)
+                  } else {
+                    setSelectedRowKeys([])
+                  }
+                },
+              }}
               pagination={{
                 pageSize: 10,
                 showSizeChanger: true,
@@ -389,38 +475,78 @@ const AdminDashboard: React.FC = () => {
           setIsUploadModalVisible(false)
           uploadForm.resetFields()
           setSelectedImages([])
+          processedFilesRef.current.clear()
         }}
         footer={null}
         width={800}
       >
         <Form form={uploadForm} onFinish={handleSubmit} layout="vertical">
-          <Form.Item label="图片上传">
+          <Form.Item label="图片上传（支持批量选择）">
             <Upload
               listType="picture-card"
+              multiple
+              accept="image/*"
               beforeUpload={(file) => {
+                // 检查单个文件大小
                 if (file.size > 5 * 1024 * 1024) {
                   message.error('图片大小不能超过5MB')
                   return false
                 }
+                
+                // 检查总数限制
                 if (selectedImages.length >= 9) {
                   message.error('最多只能上传9张图片')
                   return false
                 }
-                handleImageUpload(file)
+                
+                // 阻止自动上传，由 onChange 统一处理
                 return false
               }}
               fileList={[]}
-              disabled={uploading}
+              disabled={uploading || selectedImages.length >= 9}
+              onChange={(info) => {
+                // 只处理文件选择完成后的批量上传
+                if (info.file.status === 'removed' || uploading) {
+                  return
+                }
+                
+                // 获取所有新选择的文件（过滤已处理的）
+                const newFiles = info.fileList
+                  .map(item => item.originFileObj)
+                  .filter((file): file is File => {
+                    if (!file) return false
+                    const fileKey = `${file.name}-${file.size}-${file.lastModified}`
+                    if (processedFilesRef.current.has(fileKey)) {
+                      return false
+                    }
+                    processedFilesRef.current.add(fileKey)
+                    return true
+                  })
+                
+                if (newFiles.length > 0) {
+                  const remainingSlots = 9 - selectedImages.length
+                  const filesToUpload = newFiles.slice(0, remainingSlots)
+                  
+                  if (filesToUpload.length > 0) {
+                    handleBatchImageUpload(filesToUpload)
+                  }
+                }
+              }}
             >
               {selectedImages.length >= 9 ? null : (
                 <div>
                   <UploadOutlined />
-                  <div style={{ marginTop: 8 }}>上传图片</div>
+                  <div style={{ marginTop: 8 }}>批量上传</div>
                 </div>
               )}
             </Upload>
             <div style={{ marginTop: 8, color: '#666' }}>
-              最多上传9张图片，单张图片不超过5MB
+              支持一次选择多张图片，最多上传9张，单张图片不超过5MB
+              {selectedImages.length > 0 && (
+                <span style={{ color: '#1890ff', marginLeft: 8 }}>
+                  已选择 {selectedImages.length}/9 张
+                </span>
+              )}
             </div>
           </Form.Item>
 

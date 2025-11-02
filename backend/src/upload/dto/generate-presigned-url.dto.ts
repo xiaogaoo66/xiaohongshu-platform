@@ -9,3 +9,5 @@ export class GeneratePresignedUrlDto {
   @IsNotEmpty()
   contentType: string;
 }
+
+

@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { ContentService } from './content.service';
 import { CreateContentDto } from './dto/create-content.dto';
+import { BatchDeleteDto } from './dto/batch-delete.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ThrottlerGuard } from '@nestjs/throttler';
 
@@ -41,6 +42,12 @@ export class ContentController {
   @Delete('admin/content/:id')
   remove(@Param('id') id: string) {
     return this.contentService.remove(id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('admin/content/batch-delete')
+  batchRemove(@Body() batchDeleteDto: BatchDeleteDto) {
+    return this.contentService.batchRemove(batchDeleteDto.ids);
   }
 
   @UseGuards(JwtAuthGuard)

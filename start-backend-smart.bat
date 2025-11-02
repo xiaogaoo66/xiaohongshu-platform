@@ -19,3 +19,5 @@ echo Starting backend server...
 node backend\src\simple-server.js
 
 pause
+
+

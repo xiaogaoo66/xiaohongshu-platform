@@ -14,28 +14,60 @@ const AdminLogin: React.FC = () => {
   const [isRegister, setIsRegister] = useState(false)
 
   const loginMutation = useMutation({
-    mutationFn: (data: { username: string; password: string }) =>
-      authAPI.login(data.username, data.password).then(res => res.data),
+    mutationFn: async (data: { username: string; password: string }) => {
+      try {
+        const response = await authAPI.login(data.username, data.password)
+        return response.data
+      } catch (error: any) {
+        // 捕获所有可能的错误，包括网络错误
+        if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+          throw new Error('请求超时，请检查网络连接')
+        } else if (!error.response) {
+          throw new Error('无法连接到服务器，请检查后端服务是否正常运行')
+        }
+        throw error
+      }
+    },
     onSuccess: (data) => {
-      localStorage.setItem('admin_token', data.access_token)
-      message.success('登录成功！')
-      navigate('/admin/dashboard')
+      if (data?.access_token) {
+        localStorage.setItem('admin_token', data.access_token)
+        message.success('登录成功！')
+        navigate('/admin/dashboard')
+      } else {
+        message.error('登录失败：服务器返回的数据格式不正确')
+      }
     },
     onError: (error: any) => {
-      message.error(error.response?.data?.message || '登录失败，请检查用户名和密码')
+      const errorMessage = error.response?.data?.message || error.message || '登录失败，请检查用户名和密码'
+      message.error(errorMessage)
+      console.error('登录错误:', error)
     },
   })
 
   const registerMutation = useMutation({
-    mutationFn: (data: { username: string; password: string }) =>
-      authAPI.register(data.username, data.password).then(res => res.data),
+    mutationFn: async (data: { username: string; password: string }) => {
+      try {
+        const response = await authAPI.register(data.username, data.password)
+        return response.data
+      } catch (error: any) {
+        // 捕获所有可能的错误，包括网络错误
+        if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+          throw new Error('请求超时，请检查网络连接')
+        } else if (!error.response) {
+          throw new Error('无法连接到服务器，请检查后端服务是否正常运行')
+        }
+        throw error
+      }
+    },
     onSuccess: () => {
       message.success('注册成功！请登录')
       setIsRegister(false)
       form.resetFields()
     },
     onError: (error: any) => {
-      message.error(error.response?.data?.message || '注册失败')
+      const errorMessage = error.response?.data?.message || error.message || '注册失败'
+      message.error(errorMessage)
+      console.error('注册错误:', error)
     },
   })
 
