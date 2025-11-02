@@ -184,10 +184,10 @@ const AdminDashboard: React.FC = () => {
     }
   }
 
-  // 单个图片上传（保持向后兼容）
-  const handleImageUpload = async (file: File) => {
-    await handleBatchImageUpload([file])
-  }
+  // 单个图片上传（保持向后兼容，暂时未使用）
+  // const handleImageUpload = async (file: File) => {
+  //   await handleBatchImageUpload([file])
+  // }
 
   const handleRemoveImage = (index: number) => {
     setSelectedImages(prev => prev.filter((_, i) => i !== index))
@@ -447,7 +447,7 @@ const AdminDashboard: React.FC = () => {
               rowSelection={{
                 selectedRowKeys,
                 onChange: setSelectedRowKeys,
-                onSelectAll: (selected, selectedRows, changeRows) => {
+                onSelectAll: (selected, selectedRows) => {
                   if (selected) {
                     const allKeys = selectedRows.map(row => row.id)
                     setSelectedRowKeys(allKeys)
@@ -511,17 +511,17 @@ const AdminDashboard: React.FC = () => {
                 }
                 
                 // 获取所有新选择的文件（过滤已处理的）
-                const newFiles = info.fileList
-                  .map(item => item.originFileObj)
-                  .filter((file): file is File => {
-                    if (!file) return false
-                    const fileKey = `${file.name}-${file.size}-${file.lastModified}`
-                    if (processedFilesRef.current.has(fileKey)) {
-                      return false
-                    }
-                    processedFilesRef.current.add(fileKey)
-                    return true
-                  })
+                const newFiles: File[] = []
+                for (const item of info.fileList) {
+                  if (!item.originFileObj) continue
+                  const file = item.originFileObj as File
+                  const fileKey = `${file.name}-${file.size}-${file.lastModified}`
+                  if (processedFilesRef.current.has(fileKey)) {
+                    continue
+                  }
+                  processedFilesRef.current.add(fileKey)
+                  newFiles.push(file)
+                }
                 
                 if (newFiles.length > 0) {
                   const remainingSlots = 9 - selectedImages.length
