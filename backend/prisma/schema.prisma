@@ -22,6 +22,7 @@ model Admin {
 model Content {
   id        String    @id @default(uuid())
   images    Json      // 存储图片URL数组
+  title     String?   @db.Text  // 标题内容（可选）
   caption   String    @db.Text
   isClaimed Boolean   @default(false)
   createdAt DateTime  @default(now())

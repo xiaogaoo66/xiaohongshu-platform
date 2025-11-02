@@ -1,6 +1,7 @@
 export interface Content {
   id: string
   images: string[]
+  title?: string
   caption: string
   isClaimed: boolean
   createdAt: string
@@ -30,6 +31,7 @@ export interface LoginResponse {
 
 export interface CreateContentRequest {
   images: string[]
+  title?: string
   caption: string
 }
 

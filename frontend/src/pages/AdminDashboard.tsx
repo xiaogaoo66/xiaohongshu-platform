@@ -89,7 +89,7 @@ const AdminDashboard: React.FC = () => {
 
   // 创建内容
   const createMutation = useMutation({
-    mutationFn: (data: { images: string[]; caption: string }) =>
+    mutationFn: (data: { images: string[]; title?: string; caption: string }) =>
       contentAPI.createContent(data),
     onSuccess: () => {
       message.success('内容创建成功')
@@ -193,13 +193,14 @@ const AdminDashboard: React.FC = () => {
     setSelectedImages(prev => prev.filter((_, i) => i !== index))
   }
 
-  const handleSubmit = (values: { caption: string }) => {
+  const handleSubmit = (values: { title?: string; caption: string }) => {
     if (selectedImages.length === 0) {
       message.warning('请至少上传一张图片')
       return
     }
     createMutation.mutate({
       images: selectedImages,
+      title: values.title?.trim() || undefined,
       caption: values.caption,
     })
   }
@@ -312,6 +313,14 @@ const AdminDashboard: React.FC = () => {
                         </Space>
                       </Image.PreviewGroup>
                     </div>
+                    {record.title && (
+                      <div style={{ marginBottom: 16 }}>
+                        <Text strong>标题：</Text>
+                        <div style={{ marginTop: 8, fontSize: '16px', fontWeight: 'bold' }}>
+                          {record.title}
+                        </div>
+                      </div>
+                    )}
                     <div>
                       <Text strong>文案：</Text>
                       <div style={{ marginTop: 8, whiteSpace: 'pre-wrap' }}>
@@ -587,6 +596,18 @@ const AdminDashboard: React.FC = () => {
               </div>
             </Form.Item>
           )}
+
+          <Form.Item
+            name="title"
+            label="标题内容"
+            rules={[{ max: 100, message: '标题长度不能超过100个字符' }]}
+          >
+            <Input
+              placeholder="请输入标题内容（可选）..."
+              maxLength={100}
+              showCount
+            />
+          </Form.Item>
 
           <Form.Item
             name="caption"

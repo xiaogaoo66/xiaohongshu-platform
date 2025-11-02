@@ -137,6 +137,16 @@ const UserClaim: React.FC = () => {
             ))}
           </div>
 
+          {/* 标题内容 */}
+          {claimedContent.title && (
+            <div className="claim-title" style={{ marginBottom: '24px' }}>
+              <Title level={4}>📌 标题内容：</Title>
+              <Title level={3} style={{ marginTop: '8px', marginBottom: 0 }}>
+                {claimedContent.title}
+              </Title>
+            </div>
+          )}
+
           {/* 文案内容 */}
           <div className="claim-caption">
             <Title level={4}>📝 文案内容：</Title>
