@@ -418,12 +418,27 @@ const AdminDashboard: React.FC = () => {
           <Card 
             title="📋 内容列表" 
             className="content-list-card"
-            extra={
-              selectedRowKeys.length > 0 && (
+          >
+            {/* 批量操作栏 */}
+            {selectedRowKeys.length > 0 && (
+              <div style={{ 
+                marginBottom: 16, 
+                padding: 12, 
+                background: '#fff7e6', 
+                border: '1px solid #ffd591',
+                borderRadius: 4,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+              }}>
+                <span style={{ color: '#d46b08', fontWeight: 500 }}>
+                  已选择 <strong>{selectedRowKeys.length}</strong> 条内容
+                </span>
                 <Popconfirm
                   title={`确定要删除选中的 ${selectedRowKeys.length} 条内容吗？`}
+                  description="此操作不可恢复，请谨慎操作！"
                   onConfirm={handleBatchDelete}
-                  okText="确定"
+                  okText="确定删除"
                   cancelText="取消"
                   okType="danger"
                 >
@@ -436,9 +451,9 @@ const AdminDashboard: React.FC = () => {
                     批量删除 ({selectedRowKeys.length})
                   </Button>
                 </Popconfirm>
-              )
-            }
-          >
+              </div>
+            )}
+            
             <Table
               columns={columns}
               dataSource={contents}
