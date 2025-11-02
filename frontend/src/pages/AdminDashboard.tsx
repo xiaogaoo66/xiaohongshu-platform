@@ -16,7 +16,7 @@ import {
   Popconfirm,
   Tag,
   Divider,
-}
+} from 'antd'
 import {
   PlusOutlined,
   UploadOutlined,
