@@ -28,8 +28,11 @@ export class ContentController {
 
   @UseGuards(JwtAuthGuard)
   @Get('admin/content')
-  findAll() {
-    return this.contentService.findAll();
+  async findAll() {
+    const contents = await this.contentService.findAll();
+    // 添加日志以调试
+    console.log(`[ContentController] findAll: 准备返回 ${contents?.length || 0} 条记录`);
+    return contents;
   }
 
   @UseGuards(JwtAuthGuard)

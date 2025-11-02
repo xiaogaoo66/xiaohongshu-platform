@@ -14,9 +14,16 @@ export class ContentService {
 
   async findAll() {
     // 领取后会自动删除，所以所有记录都是未领取的
-    return this.prisma.content.findMany({
+    // 明确不设置任何限制，返回所有记录
+    const contents = await this.prisma.content.findMany({
       orderBy: { createdAt: 'desc' },
+      // 不设置 take，返回所有记录
     });
+    
+    // 添加日志以调试
+    console.log(`[ContentService] findAll: 返回 ${contents.length} 条记录`);
+    
+    return contents;
   }
 
   async findOne(id: string) {
