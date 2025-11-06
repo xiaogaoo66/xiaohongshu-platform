@@ -116,6 +116,7 @@ export const uploadAPI = {
   getPresignedUrl: (filename: string, contentType: string) =>
     api.post('/upload/presigned-url', { filename, contentType }),
   testConfig: () => api.get('/upload/test-config'),
+  diagnose: () => api.get('/upload/diagnose'),
 }
 
 export default api

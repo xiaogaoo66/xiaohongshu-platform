@@ -25,6 +25,12 @@ export class UploadController {
   async testConfig() {
     return this.uploadService.testAWSConfig();
   }
+
+  @Get('diagnose')
+  async diagnose() {
+    console.log('🔍 开始诊断上传配置...');
+    return this.uploadService.testAWSConfig();
+  }
 }
 
 

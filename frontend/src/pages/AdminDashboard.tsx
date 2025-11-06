@@ -161,17 +161,52 @@ const AdminDashboard: React.FC = () => {
         }
         
         // 上传到S3
+        // 重要：预签名URL的签名是基于特定的请求头和参数生成的
+        // 必须确保上传时的请求头与生成签名时一致
+        console.log('📤 开始上传文件:', {
+          filename: file.name,
+          contentType: file.type,
+          size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
+          urlPreview: presignedUrl.substring(0, 100) + '...',
+          timestamp: new Date().toISOString(),
+        });
+
+        const uploadStartTime = Date.now();
         const uploadResponse = await fetch(presignedUrl, {
           method: 'PUT',
           body: file,
           headers: {
             'Content-Type': file.type,
           },
+          // 不发送credentials，避免添加额外的请求头
+          credentials: 'omit',
         })
 
+        const uploadDuration = Date.now() - uploadStartTime;
+
         if (!uploadResponse.ok) {
+          const errorText = await uploadResponse.text().catch(() => '无法读取错误信息');
+          console.error('❌ 上传失败:', {
+            status: uploadResponse.status,
+            statusText: uploadResponse.statusText,
+            error: errorText,
+            filename: file.name,
+            contentType: file.type,
+            size: file.size,
+            duration: `${uploadDuration}ms`,
+            urlPreview: presignedUrl.substring(0, 100) + '...',
+            timestamp: new Date().toISOString(),
+          });
           throw new Error(`上传失败: ${uploadResponse.status} ${uploadResponse.statusText}`)
         }
+
+        console.log('✅ 上传成功:', {
+          url,
+          filename: file.name,
+          size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
+          duration: `${uploadDuration}ms`,
+          timestamp: new Date().toISOString(),
+        });
 
         return url
       })
@@ -756,10 +791,17 @@ const AdminDashboard: React.FC = () => {
                         <div style={{ marginTop: 4 }}>
                           {configTestResult.config.bucketAccess.includes('✅') ? (
                             <Tag color="green">{configTestResult.config.bucketAccess}</Tag>
+                          ) : configTestResult.config.bucketAccess.includes('⚠️') ? (
+                            <Tag color="orange">{configTestResult.config.bucketAccess}</Tag>
                           ) : (
                             <Tag color="red">{configTestResult.config.bucketAccess}</Tag>
                           )}
                         </div>
+                        {configTestResult.config?.note && (
+                          <div style={{ marginTop: 8, padding: 8, background: '#fff7e6', borderRadius: 4 }}>
+                            <Text type="secondary">{configTestResult.config.note}</Text>
+                          </div>
+                        )}
                       </div>
                     )}
                     {configTestResult.config?.presignedUrlTest && (
