@@ -60,11 +60,10 @@ export class UploadService {
       throw new Error('AWS_S3_BUCKET 环境变量未配置');
     }
 
-    const params: any = {
+    const params = {
       Bucket: bucket,
       Key: key,
       ContentType: contentType,
-      Expires: 300, // 5分钟过期（秒数）
       // 不设置 ACL，避免权限问题
       // 确保签名版本正确
     };
@@ -79,9 +78,12 @@ export class UploadService {
 
       // 使用 getSignedUrlPromise 生成预签名URL
       // 确保使用 v4 签名版本
-      // Expires 参数在 getSignedUrlPromise 中应该是秒数（number），但 TypeScript 类型定义可能期望 Date
-      // 使用 any 类型来绕过类型检查
-      const presignedUrl = await this.s3.getSignedUrlPromise('putObject', params);
+      // Expires 参数在 getSignedUrlPromise 中应该是秒数（number），但 TypeScript 类型定义期望 Date
+      // 使用类型断言来绕过类型检查
+      const presignedUrl = await this.s3.getSignedUrlPromise('putObject', {
+        ...params,
+        Expires: 300, // 5分钟过期（秒数）
+      } as any);
       
       // 解析URL以验证参数
       const urlObj = new URL(presignedUrl);
@@ -99,7 +101,7 @@ export class UploadService {
         bucket,
         signedHeaders: signedHeaders.split(','),
         contentType: contentType,
-        expiresIn: params.Expires,
+        expiresIn: 300, // 5分钟
         // 不打印完整 URL（包含敏感信息）
       });
       
