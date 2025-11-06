@@ -187,24 +187,48 @@ const AdminDashboard: React.FC = () => {
 
         const uploadStartTime = Date.now();
         
-        // 准备请求头
+        // 检查 3: Content-Type 一致性验证
+        const expectedContentType = urlParams['Content-Type'];
+        if (file.type !== expectedContentType) {
+          console.error('❌ Content-Type 不匹配:', {
+            前端上传时: file.type,
+            预签名URL中: expectedContentType,
+            是否匹配: false,
+          });
+          throw new Error(
+            `Content-Type 不匹配: 前端使用 "${file.type}"，但预签名 URL 期望 "${expectedContentType}"。` +
+            `请确保上传时的 Content-Type 与生成预签名 URL 时完全一致。`
+          );
+        }
+        
+        // 检查 4: 准备请求头（只设置 Content-Type，不添加任何其他头）
         const requestHeaders: HeadersInit = {
           'Content-Type': file.type,
         };
+        
+        // 验证请求头（确保没有额外的头）
+        const headerKeys = Object.keys(requestHeaders);
+        if (headerKeys.length !== 1 || headerKeys[0] !== 'Content-Type') {
+          console.error('❌ 检测到额外的请求头:', headerKeys);
+          throw new Error('上传时只能设置 Content-Type 请求头，不能添加其他请求头');
+        }
         
         console.log('📋 请求详情:', {
           method: 'PUT',
           url: presignedUrl.substring(0, 150) + '...',
           headers: requestHeaders,
           bodySize: file.size,
+          contentTypeMatch: file.type === expectedContentType,
         });
         
+        // 使用 fetch 直接上传（不使用 axios，避免自动添加请求头）
         const uploadResponse = await fetch(presignedUrl, {
           method: 'PUT',
           body: file,
           headers: requestHeaders,
-          // 不发送credentials，避免添加额外的请求头
+          // 不发送credentials，避免添加额外的请求头（如 Cookie）
           credentials: 'omit',
+          // 不设置 mode，使用默认值
         })
 
         const uploadDuration = Date.now() - uploadStartTime;
