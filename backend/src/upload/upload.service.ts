@@ -171,7 +171,20 @@ export class UploadService {
       } catch (error: any) {
         const errorMsg = error.message || error.code || '未知错误';
         const errorCode = error.code || 'Unknown';
-        config['bucketAccess'] = `⚠️ 无法访问存储桶: ${errorMsg} (${errorCode})`;
+        
+        // 专门处理 InvalidAccessKeyId 错误
+        if (errorCode === 'InvalidAccessKeyId' || errorMsg.includes('InvalidAccessKeyId')) {
+          config['bucketAccess'] = `❌ AWS Access Key ID 无效或不存在: ${accessKeyId?.substring(0, 8)}... (${errorCode})`;
+          config['criticalError'] = 'InvalidAccessKeyId';
+          config['errorDetails'] = {
+            code: errorCode,
+            message: errorMsg,
+            accessKeyIdPrefix: accessKeyId?.substring(0, 8) + '...',
+            recommendation: '请在 Railway 环境变量中更新 AWS_ACCESS_KEY_ID 和 AWS_SECRET_ACCESS_KEY',
+          };
+        } else {
+          config['bucketAccess'] = `⚠️ 无法访问存储桶: ${errorMsg} (${errorCode})`;
+        }
         bucketAccessSuccess = false;
       }
 
@@ -187,7 +200,22 @@ export class UploadService {
         config['testUrlLength'] = testUrl.length;
         presignedUrlSuccess = true;
       } catch (error: any) {
-        config['presignedUrlTest'] = `❌ 无法生成预签名 URL: ${error.message} (${error.code})`;
+        const errorCode = error.code || 'Unknown';
+        const errorMsg = error.message || '未知错误';
+        
+        // 专门处理 InvalidAccessKeyId 错误
+        if (errorCode === 'InvalidAccessKeyId' || errorMsg.includes('InvalidAccessKeyId')) {
+          config['presignedUrlTest'] = `❌ AWS Access Key ID 无效或不存在: ${accessKeyId?.substring(0, 8)}... (${errorCode})`;
+          config['criticalError'] = 'InvalidAccessKeyId';
+          config['errorDetails'] = {
+            code: errorCode,
+            message: errorMsg,
+            accessKeyIdPrefix: accessKeyId?.substring(0, 8) + '...',
+            recommendation: '请在 Railway 环境变量中更新 AWS_ACCESS_KEY_ID 和 AWS_SECRET_ACCESS_KEY',
+          };
+        } else {
+          config['presignedUrlTest'] = `❌ 无法生成预签名 URL: ${errorMsg} (${errorCode})`;
+        }
         presignedUrlSuccess = false;
       }
       
@@ -207,6 +235,31 @@ export class UploadService {
 
   private getRecommendations(config: any): string[] {
     const recommendations: string[] = [];
+
+    // 优先处理 InvalidAccessKeyId 错误
+    if (config.criticalError === 'InvalidAccessKeyId') {
+      recommendations.push('🚨 严重错误：AWS Access Key ID 无效或不存在');
+      recommendations.push(`   当前使用的 Access Key ID: ${config.errorDetails?.accessKeyIdPrefix || '未知'}`);
+      recommendations.push('');
+      recommendations.push('📋 解决步骤：');
+      recommendations.push('  1. 登录 AWS IAM 控制台：https://console.aws.amazon.com/iam/');
+      recommendations.push('  2. 选择你的 IAM 用户（xiaohongshu-s3-user）');
+      recommendations.push('  3. 进入"安全凭证"（Security credentials）标签');
+      recommendations.push('  4. 在"访问密钥"部分，创建新的访问密钥');
+      recommendations.push('  5. 复制新的 Access Key ID 和 Secret Access Key');
+      recommendations.push('');
+      recommendations.push('🔧 在 Railway 中更新环境变量：');
+      recommendations.push('  1. 登录 Railway：https://railway.app');
+      recommendations.push('  2. 选择你的后端服务');
+      recommendations.push('  3. 进入 "Variables"（变量）标签页');
+      recommendations.push('  4. 更新以下环境变量：');
+      recommendations.push('     - AWS_ACCESS_KEY_ID = 新的 Access Key ID');
+      recommendations.push('     - AWS_SECRET_ACCESS_KEY = 新的 Secret Access Key');
+      recommendations.push('  5. 保存后，Railway 会自动重新部署');
+      recommendations.push('');
+      recommendations.push('⚠️ 注意：旧的 Access Key 可能已被删除或过期，必须使用新的密钥');
+      return recommendations;
+    }
 
     if (!config.hasAccessKeyId || !config.hasSecretAccessKey) {
       recommendations.push('❌ 请配置 AWS_ACCESS_KEY_ID 和 AWS_SECRET_ACCESS_KEY');
