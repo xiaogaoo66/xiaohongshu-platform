@@ -60,13 +60,13 @@ export class UploadService {
       throw new Error('AWS_S3_BUCKET 环境变量未配置');
     }
 
-    const params = {
+    const params: AWS.S3.PutObjectRequest = {
       Bucket: bucket,
       Key: key,
       ContentType: contentType,
       Expires: 300, // 5分钟过期
-      // 添加 ACL 设置（如果存储桶支持）
-      // ACL: 'public-read', // 如果存储桶禁用了 ACL，注释掉这行
+      // 不设置 ACL，避免权限问题
+      // 确保签名版本正确
     };
 
     try {
@@ -77,13 +77,37 @@ export class UploadService {
         region: this.configService.get<string>('AWS_REGION'),
       });
 
+      // 使用 getSignedUrlPromise 生成预签名URL
+      // 确保使用 v4 签名版本
       const presignedUrl = await this.s3.getSignedUrlPromise('putObject', params);
+      
+      // 解析URL以验证参数
+      const urlObj = new URL(presignedUrl);
+      const hasContentType = urlObj.searchParams.has('Content-Type') || urlObj.searchParams.has('x-amz-content-sha256');
+      
+      // 解析URL以提取参数
+      const urlParams = urlObj.searchParams;
+      const signedHeaders = urlParams.get('X-Amz-SignedHeaders') || '';
       
       console.log('✅ 预签名 URL 生成成功:', {
         key,
         urlLength: presignedUrl.length,
+        hasContentTypeParam: hasContentType,
+        region: this.configService.get<string>('AWS_REGION'),
+        bucket,
+        signedHeaders: signedHeaders.split(','),
+        contentType: contentType,
+        expiresIn: params.Expires,
         // 不打印完整 URL（包含敏感信息）
       });
+      
+      // 验证关键参数
+      if (!signedHeaders.includes('host')) {
+        console.warn('⚠️ 警告: 预签名URL中未包含host签名头');
+      }
+      if (hasContentType && !urlParams.has('Content-Type')) {
+        console.warn('⚠️ 警告: Content-Type参数可能未正确包含在预签名URL中');
+      }
 
       return {
         presignedUrl,
@@ -132,15 +156,22 @@ export class UploadService {
 
     // 尝试测试 S3 连接
     if (this.s3 && bucket) {
+      let bucketAccessSuccess = false;
+      let presignedUrlSuccess = false;
+      
+      // 尝试列出存储桶（需要 s3:ListBucket 权限）
       try {
-        // 尝试列出存储桶（需要 s3:ListBucket 权限）
         await this.s3.headBucket({ Bucket: bucket }).promise();
         config['bucketAccess'] = '✅ 可以访问存储桶';
+        bucketAccessSuccess = true;
       } catch (error: any) {
-        config['bucketAccess'] = `❌ 无法访问存储桶: ${error.message} (${error.code})`;
+        const errorMsg = error.message || error.code || '未知错误';
+        const errorCode = error.code || 'Unknown';
+        config['bucketAccess'] = `⚠️ 无法访问存储桶: ${errorMsg} (${errorCode})`;
+        bucketAccessSuccess = false;
       }
 
-      // 尝试生成一个测试预签名 URL
+      // 尝试生成一个测试预签名 URL（这是关键功能）
       try {
         const testUrl = await this.s3.getSignedUrlPromise('putObject', {
           Bucket: bucket,
@@ -150,8 +181,16 @@ export class UploadService {
         });
         config['presignedUrlTest'] = '✅ 可以生成预签名 URL';
         config['testUrlLength'] = testUrl.length;
+        presignedUrlSuccess = true;
       } catch (error: any) {
         config['presignedUrlTest'] = `❌ 无法生成预签名 URL: ${error.message} (${error.code})`;
+        presignedUrlSuccess = false;
+      }
+      
+      // 如果预签名 URL 成功但 headBucket 失败，说明功能正常，只是诊断信息有问题
+      if (!bucketAccessSuccess && presignedUrlSuccess) {
+        config['bucketAccess'] = '⚠️ 无法访问存储桶（但上传功能正常）';
+        config['note'] = '虽然 headBucket 失败，但预签名 URL 生成成功，上传功能应该可以正常工作。';
       }
     }
 
@@ -177,8 +216,17 @@ export class UploadService {
       recommendations.push('❌ 请配置 AWS_S3_BUCKET');
     }
 
-    if (config.bucketAccess && config.bucketAccess.includes('❌')) {
-      recommendations.push('⚠️ 无法访问存储桶，请检查：');
+    // 只有在预签名 URL 也失败时才显示严重错误
+    const bucketAccessFailed = config.bucketAccess && (config.bucketAccess.includes('❌') || config.bucketAccess.includes('⚠️'));
+    const presignedUrlFailed = config.presignedUrlTest && config.presignedUrlTest.includes('❌');
+    
+    if (bucketAccessFailed && !presignedUrlFailed) {
+      // headBucket 失败但预签名 URL 成功，说明功能正常
+      recommendations.push('💡 提示：虽然 headBucket 失败，但预签名 URL 生成成功，上传功能应该可以正常工作。');
+      recommendations.push('   如果想修复 headBucket 错误，可以添加 s3:ListBucket 或 s3:HeadBucket 权限（可选）。');
+    } else if (bucketAccessFailed && presignedUrlFailed) {
+      // 两个都失败，说明有严重问题
+      recommendations.push('❌ 无法访问存储桶，请检查：');
       recommendations.push('  1. IAM 用户是否有 s3:ListBucket 权限');
       recommendations.push('  2. 存储桶名称是否正确');
       recommendations.push('  3. 存储桶区域是否与 AWS_REGION 匹配');
@@ -191,11 +239,22 @@ export class UploadService {
       recommendations.push('  3. 访问密钥是否正确');
     }
 
+    // 如果预签名URL成功但可能上传时403，添加详细诊断
+    if (config.presignedUrlTest && config.presignedUrlTest.includes('✅')) {
+      recommendations.push('💡 预签名 URL 生成成功，但如果上传时出现 403，请检查：');
+      recommendations.push('  1. IAM 用户是否有 s3:PutObject 权限（必需）');
+      recommendations.push('  2. 存储桶策略是否允许 PUT 操作');
+      recommendations.push('  3. 前端上传时的 Content-Type 必须与生成预签名 URL 时的 contentType 完全一致');
+      recommendations.push('  4. 前端上传时不要添加额外的请求头（只设置 Content-Type）');
+      recommendations.push('  5. 检查浏览器控制台的详细错误信息');
+    }
+
     if (recommendations.length === 0) {
       recommendations.push('✅ 配置看起来正常，如果仍然 403，请检查：');
       recommendations.push('  1. 前端上传时的 Content-Type 是否与生成预签名 URL 时一致');
       recommendations.push('  2. 存储桶的 CORS 配置是否正确');
       recommendations.push('  3. IAM 用户权限是否已生效（等待 1-2 分钟）');
+      recommendations.push('  4. 查看后端和前端控制台的详细日志');
     }
 
     return recommendations;

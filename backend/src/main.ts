@@ -18,8 +18,13 @@ async function bootstrap() {
   }));
 
   // 启用 CORS
+  const frontendUrl = process.env.FRONTEND_URL;
+  const allowedOrigins = frontendUrl
+    ? frontendUrl.split(',').map(url => url.trim())
+    : true; // 开发环境允许所有来源
+
   app.enableCors({
-    origin: process.env.FRONTEND_URL || true, // 允许所有来源（生产环境建议限制）
+    origin: allowedOrigins,
     credentials: true,
   });
 

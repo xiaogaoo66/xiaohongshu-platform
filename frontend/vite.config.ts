@@ -10,8 +10,9 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/api': {
-        target: 'http://192.168.0.142:3000', // 你的后端局域网地址
+        target: 'http://localhost:3000', // 后端服务地址
         changeOrigin: true,
+        secure: false,
       },
     },
   },

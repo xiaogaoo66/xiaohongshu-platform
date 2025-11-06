@@ -163,40 +163,95 @@ const AdminDashboard: React.FC = () => {
         // 上传到S3
         // 重要：预签名URL的签名是基于特定的请求头和参数生成的
         // 必须确保上传时的请求头与生成签名时一致
+        
+        // 解析预签名URL，提取关键信息
+        const urlObj = new URL(presignedUrl);
+        const urlParams = Object.fromEntries(urlObj.searchParams.entries());
+        
         console.log('📤 开始上传文件:', {
           filename: file.name,
           contentType: file.type,
           size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
-          urlPreview: presignedUrl.substring(0, 100) + '...',
+          bucket: urlObj.hostname.split('.')[0],
+          key: urlObj.pathname.substring(1),
+          presignedUrlParams: {
+            'X-Amz-Algorithm': urlParams['X-Amz-Algorithm'],
+            'X-Amz-Credential': urlParams['X-Amz-Credential']?.substring(0, 20) + '...',
+            'X-Amz-Date': urlParams['X-Amz-Date'],
+            'X-Amz-Expires': urlParams['X-Amz-Expires'],
+            'X-Amz-SignedHeaders': urlParams['X-Amz-SignedHeaders'],
+            'Content-Type': urlParams['Content-Type'],
+          },
           timestamp: new Date().toISOString(),
         });
 
         const uploadStartTime = Date.now();
+        
+        // 准备请求头
+        const requestHeaders: HeadersInit = {
+          'Content-Type': file.type,
+        };
+        
+        console.log('📋 请求详情:', {
+          method: 'PUT',
+          url: presignedUrl.substring(0, 150) + '...',
+          headers: requestHeaders,
+          bodySize: file.size,
+        });
+        
         const uploadResponse = await fetch(presignedUrl, {
           method: 'PUT',
           body: file,
-          headers: {
-            'Content-Type': file.type,
-          },
+          headers: requestHeaders,
           // 不发送credentials，避免添加额外的请求头
           credentials: 'omit',
         })
 
         const uploadDuration = Date.now() - uploadStartTime;
+        
+        // 记录响应头
+        const responseHeaders: Record<string, string> = {};
+        uploadResponse.headers.forEach((value, key) => {
+          responseHeaders[key] = value;
+        });
 
         if (!uploadResponse.ok) {
           const errorText = await uploadResponse.text().catch(() => '无法读取错误信息');
-          console.error('❌ 上传失败:', {
+          console.error('❌ 上传失败 - 详细诊断:', {
             status: uploadResponse.status,
             statusText: uploadResponse.statusText,
             error: errorText,
             filename: file.name,
             contentType: file.type,
+            expectedContentType: urlParams['Content-Type'],
+            contentTypeMatch: file.type === urlParams['Content-Type'],
             size: file.size,
             duration: `${uploadDuration}ms`,
-            urlPreview: presignedUrl.substring(0, 100) + '...',
+            requestHeaders,
+            responseHeaders,
+            presignedUrlParams: {
+              'X-Amz-SignedHeaders': urlParams['X-Amz-SignedHeaders'],
+              'Content-Type': urlParams['Content-Type'],
+            },
+            urlPreview: presignedUrl.substring(0, 150) + '...',
             timestamp: new Date().toISOString(),
           });
+          
+          // 如果是403错误，提供更详细的诊断建议
+          if (uploadResponse.status === 403) {
+            console.error('🔍 403 Forbidden 诊断建议:', {
+              '可能原因1': 'Content-Type 不匹配',
+              '当前ContentType': file.type,
+              '预签名URL中的ContentType': urlParams['Content-Type'],
+              '是否匹配': file.type === urlParams['Content-Type'],
+              '可能原因2': 'IAM权限不足',
+              '需要权限': 's3:PutObject',
+              '可能原因3': '存储桶策略限制',
+              '可能原因4': '预签名URL已过期',
+              'X-Amz-Expires': urlParams['X-Amz-Expires'],
+            });
+          }
+          
           throw new Error(`上传失败: ${uploadResponse.status} ${uploadResponse.statusText}`)
         }
 
@@ -270,10 +325,13 @@ const AdminDashboard: React.FC = () => {
     setIsConfigTestModalVisible(true)
     
     try {
+      console.log('🔍 开始诊断 AWS 配置...')
       const response = await uploadAPI.testConfig()
       setConfigTestResult(response.data)
-      message.success('配置测试完成')
+      console.log('✅ AWS 配置诊断结果:', response.data)
+      message.success('配置测试完成，请查看控制台获取详细信息')
     } catch (error: any) {
+      console.error('❌ AWS 配置诊断失败:', error)
       setConfigTestResult({
         error: true,
         message: error.response?.data?.message || error.message || '测试失败',
@@ -281,6 +339,19 @@ const AdminDashboard: React.FC = () => {
       message.error('配置测试失败')
     } finally {
       setConfigTestLoading(false)
+    }
+  }
+
+  // 快速诊断（无需打开弹窗）
+  const handleQuickDiagnose = async () => {
+    try {
+      console.log('🔍 开始快速诊断...')
+      const response = await uploadAPI.diagnose()
+      console.log('✅ 诊断结果:', response.data)
+      message.success('诊断完成，请查看控制台')
+    } catch (error: any) {
+      console.error('❌ 诊断失败:', error)
+      message.error('诊断失败，请查看控制台')
     }
   }
 
@@ -485,6 +556,14 @@ const AdminDashboard: React.FC = () => {
                 onClick={handleTestConfig}
               >
                 测试 AWS 配置
+              </Button>
+              <Button
+                type="dashed"
+                block
+                onClick={handleQuickDiagnose}
+                style={{ marginTop: 8 }}
+              >
+                快速诊断（控制台）
               </Button>
             </Space>
           </Card>
