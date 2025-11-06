@@ -25,6 +25,7 @@ import {
   BarChartOutlined,
   LogoutOutlined,
   HomeOutlined,
+  BugOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
@@ -38,6 +39,9 @@ const { TextArea } = Input
 
 const AdminDashboard: React.FC = () => {
   const [isUploadModalVisible, setIsUploadModalVisible] = useState(false)
+  const [isConfigTestModalVisible, setIsConfigTestModalVisible] = useState(false)
+  const [configTestResult, setConfigTestResult] = useState<any>(null)
+  const [configTestLoading, setConfigTestLoading] = useState(false)
   const [uploadForm] = Form.useForm()
   const [selectedImages, setSelectedImages] = useState<string[]>([])
   const [uploading, setUploading] = useState(false)
@@ -222,6 +226,27 @@ const AdminDashboard: React.FC = () => {
         batchDeleteMutation.mutate(selectedRowKeys as string[])
       },
     })
+  }
+
+  // 测试 AWS 配置
+  const handleTestConfig = async () => {
+    setConfigTestLoading(true)
+    setConfigTestResult(null)
+    setIsConfigTestModalVisible(true)
+    
+    try {
+      const response = await uploadAPI.testConfig()
+      setConfigTestResult(response.data)
+      message.success('配置测试完成')
+    } catch (error: any) {
+      setConfigTestResult({
+        error: true,
+        message: error.response?.data?.message || error.message || '测试失败',
+      })
+      message.error('配置测试失败')
+    } finally {
+      setConfigTestLoading(false)
+    }
   }
 
   const columns = [
@@ -418,6 +443,13 @@ const AdminDashboard: React.FC = () => {
                 onClick={() => queryClient.invalidateQueries({ queryKey: ['adminStats'] })}
               >
                 刷新统计
+              </Button>
+              <Button
+                icon={<BugOutlined />}
+                block
+                onClick={handleTestConfig}
+              >
+                测试 AWS 配置
               </Button>
             </Space>
           </Card>
@@ -643,6 +675,126 @@ const AdminDashboard: React.FC = () => {
             </Space>
           </Form.Item>
         </Form>
+      </Modal>
+
+      {/* AWS 配置测试模态框 */}
+      <Modal
+        title="🔍 AWS S3 配置诊断"
+        open={isConfigTestModalVisible}
+        onCancel={() => setIsConfigTestModalVisible(false)}
+        footer={[
+          <Button key="close" onClick={() => setIsConfigTestModalVisible(false)}>
+            关闭
+          </Button>,
+          <Button key="retry" type="primary" onClick={handleTestConfig} loading={configTestLoading}>
+            重新测试
+          </Button>,
+        ]}
+        width={800}
+      >
+        {configTestLoading ? (
+          <div style={{ textAlign: 'center', padding: '40px 0' }}>
+            <Space direction="vertical" size="large">
+              <div>正在测试 AWS 配置...</div>
+            </Space>
+          </div>
+        ) : configTestResult ? (
+          <div>
+            {configTestResult.error ? (
+              <div style={{ color: '#ff4d4f', marginBottom: 16 }}>
+                <Text strong>❌ 测试失败：</Text>
+                <div style={{ marginTop: 8 }}>{configTestResult.message}</div>
+              </div>
+            ) : (
+              <>
+                <div style={{ marginBottom: 16 }}>
+                  <Text strong>{configTestResult.message}</Text>
+                </div>
+                
+                <Card title="配置信息" size="small" style={{ marginBottom: 16 }}>
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <div>
+                      <Text strong>访问密钥 ID：</Text>{' '}
+                      {configTestResult.config?.hasAccessKeyId ? (
+                        <Tag color="green">✅ 已配置</Tag>
+                      ) : (
+                        <Tag color="red">❌ 未配置</Tag>
+                      )}
+                      {configTestResult.config?.accessKeyIdPrefix && (
+                        <Text code style={{ marginLeft: 8 }}>
+                          {configTestResult.config.accessKeyIdPrefix}
+                        </Text>
+                      )}
+                    </div>
+                    <div>
+                      <Text strong>密钥：</Text>{' '}
+                      {configTestResult.config?.hasSecretAccessKey ? (
+                        <Tag color="green">✅ 已配置</Tag>
+                      ) : (
+                        <Tag color="red">❌ 未配置</Tag>
+                      )}
+                    </div>
+                    <div>
+                      <Text strong>区域：</Text>{' '}
+                      <Text code>{configTestResult.config?.region || '未配置'}</Text>
+                    </div>
+                    <div>
+                      <Text strong>存储桶：</Text>{' '}
+                      <Text code>{configTestResult.config?.bucket || '未配置'}</Text>
+                    </div>
+                    <div>
+                      <Text strong>S3 客户端：</Text>{' '}
+                      {configTestResult.config?.s3Initialized ? (
+                        <Tag color="green">✅ 已初始化</Tag>
+                      ) : (
+                        <Tag color="red">❌ 未初始化</Tag>
+                      )}
+                    </div>
+                    {configTestResult.config?.bucketAccess && (
+                      <div>
+                        <Text strong>存储桶访问：</Text>{' '}
+                        <div style={{ marginTop: 4 }}>
+                          {configTestResult.config.bucketAccess.includes('✅') ? (
+                            <Tag color="green">{configTestResult.config.bucketAccess}</Tag>
+                          ) : (
+                            <Tag color="red">{configTestResult.config.bucketAccess}</Tag>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    {configTestResult.config?.presignedUrlTest && (
+                      <div>
+                        <Text strong>预签名 URL 测试：</Text>{' '}
+                        <div style={{ marginTop: 4 }}>
+                          {configTestResult.config.presignedUrlTest.includes('✅') ? (
+                            <Tag color="green">{configTestResult.config.presignedUrlTest}</Tag>
+                          ) : (
+                            <Tag color="red">{configTestResult.config.presignedUrlTest}</Tag>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </Space>
+                </Card>
+
+                {configTestResult.recommendations && configTestResult.recommendations.length > 0 && (
+                  <Card title="修复建议" size="small">
+                    <Space direction="vertical" style={{ width: '100%' }}>
+                      {configTestResult.recommendations.map((rec: string, index: number) => (
+                        <div key={index} style={{ 
+                          padding: '4px 0',
+                          color: rec.includes('❌') ? '#ff4d4f' : rec.includes('⚠️') ? '#faad14' : '#52c41a'
+                        }}>
+                          {rec}
+                        </div>
+                      ))}
+                    </Space>
+                  </Card>
+                )}
+              </>
+            )}
+          </div>
+        ) : null}
       </Modal>
     </Layout>
   )
