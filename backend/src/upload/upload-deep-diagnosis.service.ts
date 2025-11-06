@@ -597,27 +597,103 @@ export class UploadDeepDiagnosisService {
           },
         });
 
-        // 检查策略中是否允许 PutObject
+        // 详细分析策略中的 Actions
         const statements = policyDoc.Statement || [];
-        const hasPutObject = statements.some(
-          (stmt: any) =>
-            stmt.Effect === 'Allow' &&
-            (stmt.Action?.includes('s3:PutObject') ||
-              stmt.Action === 's3:PutObject' ||
-              stmt.Action === 's3:*'),
+        const allActions: string[] = [];
+        const allPrincipals: string[] = [];
+        
+        statements.forEach((stmt: any) => {
+          if (stmt.Effect === 'Allow') {
+            // 收集所有 Actions
+            if (Array.isArray(stmt.Action)) {
+              allActions.push(...stmt.Action);
+            } else if (stmt.Action) {
+              allActions.push(stmt.Action);
+            }
+            
+            // 收集所有 Principals
+            if (stmt.Principal) {
+              if (typeof stmt.Principal === 'string') {
+                allPrincipals.push(stmt.Principal);
+              } else if (stmt.Principal['*']) {
+                allPrincipals.push('*');
+              } else if (typeof stmt.Principal === 'object') {
+                Object.keys(stmt.Principal).forEach(key => allPrincipals.push(key));
+              }
+            }
+          }
+        });
+
+        // 检查是否有 PutObject 权限
+        const hasPutObject = allActions.some(
+          (action) =>
+            action === 's3:PutObject' ||
+            action === 's3:PutObject*' ||
+            action === 's3:*' ||
+            (typeof action === 'string' && action.includes('PutObject')),
         );
+
+        // 检查是否有 GetObject 权限
+        const hasGetObject = allActions.some(
+          (action) =>
+            action === 's3:GetObject' ||
+            action === 's3:GetObject*' ||
+            action === 's3:*' ||
+            (typeof action === 'string' && action.includes('GetObject')),
+        );
+
+        // 详细报告策略内容
+        results.push({
+          category: '存储桶策略',
+          test: '策略 Actions 分析',
+          status: 'pass',
+          message: `策略包含 ${allActions.length} 个操作`,
+          details: {
+            actions: allActions,
+            principals: allPrincipals,
+            hasGetObject,
+            hasPutObject,
+          },
+        });
 
         if (!hasPutObject) {
           results.push({
             category: '存储桶策略',
             test: 'PutObject 权限',
-            status: 'warning',
-            message: '存储桶策略中可能没有明确允许 s3:PutObject',
+            status: 'fail',
+            message: '❌ 存储桶策略中没有 s3:PutObject 权限！当前策略只允许读取（GetObject），不允许上传',
             details: {
-              statements: statements.length,
+              currentActions: allActions,
+              missingAction: 's3:PutObject',
+              recommendation: '需要在存储桶策略中添加 s3:PutObject 权限，或者确保IAM用户有足够的权限',
             },
           });
-          recommendations.push('检查存储桶策略是否允许 s3:PutObject 操作');
+          criticalIssues.push('存储桶策略缺少 s3:PutObject 权限');
+          recommendations.push(
+            '在存储桶策略中添加 s3:PutObject 权限。示例：在 Statement 中添加 {"Effect": "Allow", "Principal": {"AWS": "arn:aws:iam::YOUR_ACCOUNT:user/YOUR_USER"}, "Action": "s3:PutObject", "Resource": "arn:aws:s3:::YOUR_BUCKET/*"}',
+          );
+        } else {
+          results.push({
+            category: '存储桶策略',
+            test: 'PutObject 权限',
+            status: 'pass',
+            message: '✅ 存储桶策略包含 s3:PutObject 权限',
+          });
+        }
+
+        // 如果只有 GetObject，给出明确警告
+        if (hasGetObject && !hasPutObject) {
+          results.push({
+            category: '存储桶策略',
+            test: '策略权限分析',
+            status: 'fail',
+            message: '⚠️ 存储桶策略配置问题：只有读取权限，没有上传权限',
+            details: {
+              problem: '策略只允许 s3:GetObject（下载），不允许 s3:PutObject（上传）',
+              impact: '这可能导致预签名URL上传失败，即使IAM用户有权限',
+              solution: '需要修改存储桶策略，添加 s3:PutObject 权限',
+            },
+          });
         }
       } catch (error: any) {
         if (error.code === 'NoSuchBucketPolicy') {
