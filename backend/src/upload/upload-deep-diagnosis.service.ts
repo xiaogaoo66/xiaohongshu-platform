@@ -1204,5 +1204,189 @@ export class UploadDeepDiagnosisService {
       });
     }
   }
+
+  /**
+   * 检查存储桶策略是否生效
+   * 验证策略是否包含必要的 PutObject 权限
+   */
+  async checkPolicyEffectiveness(): Promise<{
+    success: boolean;
+    policyExists: boolean;
+    currentPolicy?: any;
+    hasPutObject: boolean;
+    hasGetObject: boolean;
+    hasPutObjectAcl: boolean;
+    policyDetails: {
+      statements: number;
+      actions: string[];
+      principals: string[];
+    };
+    message: string;
+    recommendations?: string[];
+  }> {
+    if (!this.s3) {
+      return {
+        success: false,
+        policyExists: false,
+        hasPutObject: false,
+        hasGetObject: false,
+        hasPutObjectAcl: false,
+        policyDetails: {
+          statements: 0,
+          actions: [],
+          principals: [],
+        },
+        message: 'S3 客户端未初始化',
+        recommendations: ['检查 AWS 环境变量配置'],
+      };
+    }
+
+    try {
+      const bucket = this.configService.get<string>('AWS_S3_BUCKET');
+
+      // 尝试获取存储桶策略
+      try {
+        const policyResponse = await this.s3.getBucketPolicy({ Bucket: bucket }).promise();
+        const policyDoc = JSON.parse(policyResponse.Policy || '{}');
+
+        // 分析策略
+        const statements = policyDoc.Statement || [];
+        const allActions: string[] = [];
+        const allPrincipals: string[] = [];
+
+        statements.forEach((stmt: any) => {
+          if (stmt.Effect === 'Allow') {
+            // 收集所有 Actions
+            if (Array.isArray(stmt.Action)) {
+              allActions.push(...stmt.Action);
+            } else if (stmt.Action) {
+              allActions.push(stmt.Action);
+            }
+
+            // 收集所有 Principals
+            if (stmt.Principal) {
+              if (typeof stmt.Principal === 'string') {
+                allPrincipals.push(stmt.Principal);
+              } else if (stmt.Principal['*']) {
+                allPrincipals.push('*');
+              } else if (typeof stmt.Principal === 'object') {
+                Object.keys(stmt.Principal).forEach((key) => {
+                  if (Array.isArray(stmt.Principal[key])) {
+                    allPrincipals.push(...stmt.Principal[key]);
+                  } else {
+                    allPrincipals.push(stmt.Principal[key]);
+                  }
+                });
+              }
+            }
+          }
+        });
+
+        // 检查权限
+        const hasPutObject = allActions.some(
+          (action) =>
+            action === 's3:PutObject' ||
+            action === 's3:PutObject*' ||
+            action === 's3:*' ||
+            (typeof action === 'string' && action.includes('PutObject')),
+        );
+
+        const hasGetObject = allActions.some(
+          (action) =>
+            action === 's3:GetObject' ||
+            action === 's3:GetObject*' ||
+            action === 's3:*' ||
+            (typeof action === 'string' && action.includes('GetObject')),
+        );
+
+        const hasPutObjectAcl = allActions.some(
+          (action) =>
+            action === 's3:PutObjectAcl' ||
+            action === 's3:PutObjectAcl*' ||
+            action === 's3:*' ||
+            (typeof action === 'string' && action.includes('PutObjectAcl')),
+        );
+
+        const recommendations: string[] = [];
+        if (!hasPutObject) {
+          recommendations.push('存储桶策略缺少 s3:PutObject 权限，需要添加该权限');
+        }
+        if (!hasGetObject) {
+          recommendations.push('存储桶策略缺少 s3:GetObject 权限，需要添加该权限');
+        }
+
+        return {
+          success: true,
+          policyExists: true,
+          currentPolicy: policyDoc,
+          hasPutObject,
+          hasGetObject,
+          hasPutObjectAcl,
+          policyDetails: {
+            statements: statements.length,
+            actions: [...new Set(allActions)],
+            principals: [...new Set(allPrincipals)],
+          },
+          message: hasPutObject
+            ? '✅ 存储桶策略已生效，包含 PutObject 权限'
+            : '⚠️ 存储桶策略已生效，但缺少 PutObject 权限',
+          recommendations: recommendations.length > 0 ? recommendations : undefined,
+        };
+      } catch (error: any) {
+        if (error.code === 'NoSuchBucketPolicy') {
+          return {
+            success: true,
+            policyExists: false,
+            hasPutObject: false,
+            hasGetObject: false,
+            hasPutObjectAcl: false,
+            policyDetails: {
+              statements: 0,
+              actions: [],
+              principals: [],
+            },
+            message: '存储桶策略未配置（可能依赖IAM策略）',
+            recommendations: [
+              '如果使用预签名URL上传，确保IAM用户有 s3:PutObject 权限',
+              '或者添加存储桶策略以明确允许上传',
+            ],
+          };
+        } else {
+          return {
+            success: false,
+            policyExists: false,
+            hasPutObject: false,
+            hasGetObject: false,
+            hasPutObjectAcl: false,
+            policyDetails: {
+              statements: 0,
+              actions: [],
+              principals: [],
+            },
+            message: `无法获取存储桶策略: ${error.code || error.message}`,
+            recommendations: [
+              '检查IAM用户是否有 s3:GetBucketPolicy 权限',
+              '检查存储桶名称是否正确',
+            ],
+          };
+        }
+      }
+    } catch (error: any) {
+      return {
+        success: false,
+        policyExists: false,
+        hasPutObject: false,
+        hasGetObject: false,
+        hasPutObjectAcl: false,
+        policyDetails: {
+          statements: 0,
+          actions: [],
+          principals: [],
+        },
+        message: `检查存储桶策略失败: ${error.message}`,
+        recommendations: ['检查AWS配置和网络连接'],
+      };
+    }
+  }
 }
 

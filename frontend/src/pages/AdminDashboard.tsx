@@ -263,17 +263,62 @@ const AdminDashboard: React.FC = () => {
           
           // 如果是403错误，提供更详细的诊断建议
           if (uploadResponse.status === 403) {
-            console.error('🔍 403 Forbidden 诊断建议:', {
-              '可能原因1': 'Content-Type 不匹配',
-              '当前ContentType': file.type,
-              '预签名URL中的ContentType': urlParams['Content-Type'],
-              '是否匹配': file.type === urlParams['Content-Type'],
-              '可能原因2': 'IAM权限不足',
-              '需要权限': 's3:PutObject',
-              '可能原因3': '存储桶策略限制',
-              '可能原因4': '预签名URL已过期',
-              'X-Amz-Expires': urlParams['X-Amz-Expires'],
-            });
+            const contentTypeMatch = file.type === urlParams['Content-Type'];
+            const expires = parseInt(urlParams['X-Amz-Expires'] || '0', 10);
+            const isExpired = expires <= 0;
+            
+            // 分析最可能的原因
+            const diagnosis = {
+              '可能原因1: Content-Type 不匹配': {
+                status: contentTypeMatch ? '✅ 已排除' : '❌ 可能',
+                details: {
+                  '当前ContentType': file.type,
+                  '预签名URL中的ContentType': urlParams['Content-Type'],
+                  '是否匹配': contentTypeMatch,
+                },
+              },
+              '可能原因2: IAM权限不足': {
+                status: '✅ 已排除（用户已检查）',
+                details: {
+                  '需要权限': 's3:PutObject',
+                  '建议': '如果已确认IAM权限正确，请检查存储桶策略',
+                },
+              },
+              '可能原因3: 存储桶策略限制': {
+                status: '⚠️ 最可能的原因',
+                details: {
+                  '问题': '存储桶策略可能只允许 s3:GetObject（读取），不允许 s3:PutObject（上传）',
+                  '检查方法': '1. 登录 AWS 控制台\n2. 进入 S3 服务\n3. 选择存储桶\n4. 查看"权限" -> "存储桶策略"\n5. 检查是否有 s3:PutObject 权限',
+                  '修复建议': '在存储桶策略中添加 s3:PutObject 权限，或确保IAM用户有足够权限',
+                  '详细文档': '查看 docs/BUCKET_POLICY_FIX.md',
+                },
+              },
+              '可能原因4: 预签名URL已过期': {
+                status: isExpired ? '❌ 可能' : '✅ 已排除（用户已检查）',
+                details: {
+                  'X-Amz-Expires': urlParams['X-Amz-Expires'],
+                  '是否过期': isExpired,
+                },
+              },
+            };
+            
+            console.error('🔍 403 Forbidden 详细诊断:', diagnosis);
+            console.error('💡 重点检查: 存储桶策略是否包含 s3:PutObject 权限');
+            console.error('📖 修复指南: 查看项目中的 docs/BUCKET_POLICY_FIX.md 文件');
+            
+            // 在控制台显示醒目的提示
+            console.error(
+              '%c⚠️ 存储桶策略问题诊断',
+              'color: red; font-size: 16px; font-weight: bold;'
+            );
+            console.error(
+              '%c如果已排除 IAM 权限和 URL 过期问题，最可能的原因是存储桶策略限制。',
+              'color: orange; font-size: 14px;'
+            );
+            console.error(
+              '%c请检查 AWS S3 控制台中的存储桶策略，确保包含 s3:PutObject 权限。',
+              'color: orange; font-size: 14px;'
+            );
           }
           
           throw new Error(`上传失败: ${uploadResponse.status} ${uploadResponse.statusText}`)

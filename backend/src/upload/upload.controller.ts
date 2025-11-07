@@ -39,6 +39,12 @@ export class UploadController {
     console.log('🔬 开始深度诊断...');
     return this.deepDiagnosisService.performDeepDiagnosis();
   }
+
+  @Get('check-policy')
+  async checkPolicy() {
+    console.log('🔍 检查存储桶策略是否生效...');
+    return this.deepDiagnosisService.checkPolicyEffectiveness();
+  }
 }
 
 
