@@ -4,6 +4,7 @@ import { UploadDeepDiagnosisService } from './upload-deep-diagnosis.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { GeneratePresignedUrlDto } from './dto/generate-presigned-url.dto';
 import { ConfigService } from '@nestjs/config';
+import type { DiagnosisResult } from './upload-deep-diagnosis.service';
 
 @Controller('api/upload')
 export class UploadController {
@@ -35,7 +36,17 @@ export class UploadController {
   }
 
   @Get('deep-diagnosis')
-  async deepDiagnosis() {
+  async deepDiagnosis(): Promise<{
+    summary: {
+      total: number;
+      passed: number;
+      failed: number;
+      warnings: number;
+    };
+    results: DiagnosisResult[];
+    criticalIssues: string[];
+    recommendations: string[];
+  }> {
     console.log('🔬 开始深度诊断...');
     return this.deepDiagnosisService.performDeepDiagnosis();
   }
