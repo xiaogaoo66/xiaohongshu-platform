@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as AWS from 'aws-sdk';
 
-interface DiagnosisResult {
+export interface DiagnosisResult {
   category: string;
   test: string;
   status: 'pass' | 'fail' | 'warning';
