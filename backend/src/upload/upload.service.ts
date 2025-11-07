@@ -149,15 +149,29 @@ export class UploadService {
     const region = this.configService.get<string>('AWS_REGION');
     const bucket = this.configService.get<string>('AWS_S3_BUCKET');
 
+    // 检查 Access Key ID 格式
+    const accessKeyIdLength = accessKeyId ? accessKeyId.length : 0;
+    const accessKeyIdFormatValid = accessKeyId ? /^AKIA[0-9A-Z]{16}$/.test(accessKeyId) : false;
+    
     const config = {
       hasAccessKeyId: !!accessKeyId,
       hasSecretAccessKey: !!secretAccessKey,
       region: region || '未配置',
       bucket: bucket || '未配置',
       accessKeyIdPrefix: accessKeyId ? accessKeyId.substring(0, 8) + '...' : '未配置',
+      accessKeyIdLength: accessKeyIdLength,
+      accessKeyIdFormatValid: accessKeyIdFormatValid,
+      accessKeyIdFull: accessKeyId || '未配置', // 显示完整 Access Key ID（用于诊断）
       s3Initialized: !!this.s3,
     };
 
+    // 检查 Access Key ID 格式问题
+    if (accessKeyId && !accessKeyIdFormatValid) {
+      config['accessKeyIdWarning'] = `⚠️ Access Key ID 格式可能不正确（长度: ${accessKeyIdLength}，应为 20 个字符）`;
+      config['accessKeyIdIssue'] = `当前值: ${accessKeyId}（${accessKeyIdLength} 字符）`;
+      config['accessKeyIdExpected'] = '格式应为: AKIA + 16位大写字母和数字（总共 20 字符）';
+    }
+    
     // 尝试测试 S3 连接
     if (this.s3 && bucket) {
       let bucketAccessSuccess = false;
@@ -236,6 +250,25 @@ export class UploadService {
   private getRecommendations(config: any): string[] {
     const recommendations: string[] = [];
 
+    // 优先处理 Access Key ID 格式问题
+    if (config.accessKeyIdWarning) {
+      recommendations.push('⚠️ Access Key ID 格式问题');
+      recommendations.push(`   ${config.accessKeyIdIssue}`);
+      recommendations.push(`   ${config.accessKeyIdExpected}`);
+      recommendations.push('');
+      recommendations.push('🔧 可能的原因：');
+      recommendations.push('  1. Access Key ID 在 Railway 环境变量中被截断');
+      recommendations.push('  2. 复制时遗漏了最后一个字符');
+      recommendations.push('  3. 环境变量中有多余的空格或换行符');
+      recommendations.push('');
+      recommendations.push('✅ 解决步骤：');
+      recommendations.push('  1. 在 AWS IAM 控制台查看完整的 Access Key ID');
+      recommendations.push('  2. 在 Railway 中删除旧的 AWS_ACCESS_KEY_ID 变量');
+      recommendations.push('  3. 重新添加 AWS_ACCESS_KEY_ID，确保完整复制（20 个字符）');
+      recommendations.push('  4. 保存后等待 Railway 重新部署');
+      recommendations.push('');
+    }
+
     // 优先处理 InvalidAccessKeyId 错误
     if (config.criticalError === 'InvalidAccessKeyId') {
       recommendations.push('🚨 严重错误：AWS Access Key ID 无效或不存在');
@@ -312,6 +345,286 @@ export class UploadService {
       recommendations.push('  2. 存储桶的 CORS 配置是否正确');
       recommendations.push('  3. IAM 用户权限是否已生效（等待 1-2 分钟）');
       recommendations.push('  4. 查看后端和前端控制台的详细日志');
+    }
+
+    return recommendations;
+  }
+
+  /**
+   * 检查存储桶策略是否已生效
+   * 验证策略是否包含 PutObject 权限
+   */
+  async checkBucketPolicyStatus() {
+    if (!this.s3) {
+      return {
+        success: false,
+        error: 'S3 客户端未初始化',
+        message: '请先配置 AWS 环境变量',
+      };
+    }
+
+    const bucket = this.configService.get<string>('AWS_S3_BUCKET');
+    if (!bucket) {
+      return {
+        success: false,
+        error: '存储桶名称未配置',
+        message: '请配置 AWS_S3_BUCKET 环境变量',
+      };
+    }
+
+    try {
+      // 获取当前存储桶策略
+      const policy = await this.s3.getBucketPolicy({ Bucket: bucket }).promise();
+      const policyDoc = JSON.parse(policy.Policy || '{}');
+
+      // 分析策略内容
+      const statements = policyDoc.Statement || [];
+      const allActions: string[] = [];
+      const allPrincipals: string[] = [];
+      const statementsDetails: any[] = [];
+
+      statements.forEach((stmt: any, index: number) => {
+        const stmtActions: string[] = [];
+        const stmtPrincipals: string[] = [];
+
+        if (stmt.Effect === 'Allow') {
+          // 收集 Actions
+          if (Array.isArray(stmt.Action)) {
+            stmtActions.push(...stmt.Action);
+            allActions.push(...stmt.Action);
+          } else if (stmt.Action) {
+            stmtActions.push(stmt.Action);
+            allActions.push(stmt.Action);
+          }
+
+          // 收集 Principals
+          if (stmt.Principal) {
+            if (typeof stmt.Principal === 'string') {
+              stmtPrincipals.push(stmt.Principal);
+              allPrincipals.push(stmt.Principal);
+            } else if (stmt.Principal['*']) {
+              stmtPrincipals.push('*');
+              allPrincipals.push('*');
+            } else if (typeof stmt.Principal === 'object') {
+              Object.keys(stmt.Principal).forEach((key) => {
+                const principalValue = stmt.Principal[key];
+                if (Array.isArray(principalValue)) {
+                  stmtPrincipals.push(...principalValue);
+                  allPrincipals.push(...principalValue);
+                } else {
+                  stmtPrincipals.push(principalValue);
+                  allPrincipals.push(principalValue);
+                }
+              });
+            }
+          }
+        }
+
+        statementsDetails.push({
+          index: index + 1,
+          sid: stmt.Sid || `Statement-${index + 1}`,
+          effect: stmt.Effect,
+          actions: stmtActions,
+          principals: stmtPrincipals,
+          resources: Array.isArray(stmt.Resource) ? stmt.Resource : [stmt.Resource].filter(Boolean),
+        });
+      });
+
+      // 检查关键权限
+      const hasPutObject = allActions.some(
+        (action) =>
+          action === 's3:PutObject' ||
+          action === 's3:PutObject*' ||
+          action === 's3:*' ||
+          (typeof action === 'string' && action.includes('PutObject')),
+      );
+
+      const hasGetObject = allActions.some(
+        (action) =>
+          action === 's3:GetObject' ||
+          action === 's3:GetObject*' ||
+          action === 's3:*' ||
+          (typeof action === 'string' && action.includes('GetObject')),
+      );
+
+      const hasPutObjectAcl = allActions.some(
+        (action) =>
+          action === 's3:PutObjectAcl' ||
+          action === 's3:PutObject*' ||
+          action === 's3:*' ||
+          (typeof action === 'string' && action.includes('PutObjectAcl')),
+      );
+
+      // 检查策略是否与用户提供的新策略匹配
+      const expectedActions = ['s3:GetObject', 's3:PutObject', 's3:PutObjectAcl'];
+      const hasAllExpectedActions = expectedActions.every((expectedAction) =>
+        allActions.some(
+          (action) =>
+            action === expectedAction ||
+            action === 's3:*' ||
+            (typeof action === 'string' && action.includes(expectedAction.split(':')[1])),
+        ),
+      );
+
+      // 检查是否有公共访问（Principal: "*"）
+      const hasPublicAccess = allPrincipals.includes('*');
+
+      // 验证策略是否生效 - 尝试实际上传测试
+      let uploadTestResult: any = null;
+      try {
+        const testKey = `policy-check-test-${Date.now()}.txt`;
+        const testContent = 'Policy check test file';
+        const testContentType = 'text/plain';
+
+        // 生成预签名URL
+        const presignedUrl = await this.s3.getSignedUrlPromise('putObject', {
+          Bucket: bucket,
+          Key: testKey,
+          ContentType: testContentType,
+          Expires: 60,
+        } as any);
+
+        // 尝试实际上传
+        try {
+          await this.s3
+            .putObject({
+              Bucket: bucket,
+              Key: testKey,
+              Body: testContent,
+              ContentType: testContentType,
+            })
+            .promise();
+
+          uploadTestResult = {
+            success: true,
+            message: '✅ 实际上传测试成功 - 策略已生效！',
+            method: '直接上传（AWS SDK）',
+          };
+
+          // 清理测试文件
+          try {
+            await this.s3.deleteObject({ Bucket: bucket, Key: testKey }).promise();
+          } catch (e) {
+            // 忽略清理错误
+          }
+        } catch (uploadError: any) {
+          uploadTestResult = {
+            success: false,
+            message: `❌ 实际上传测试失败: ${uploadError.code || uploadError.message}`,
+            error: uploadError.code,
+            errorMessage: uploadError.message,
+            method: '直接上传（AWS SDK）',
+          };
+        }
+      } catch (urlError: any) {
+        uploadTestResult = {
+          success: false,
+          message: `❌ 无法生成预签名URL: ${urlError.code || urlError.message}`,
+          error: urlError.code,
+          errorMessage: urlError.message,
+        };
+      }
+
+      return {
+        success: true,
+        bucket,
+        policyExists: true,
+        policyVersion: policyDoc.Version,
+        statementsCount: statements.length,
+        statements: statementsDetails,
+        permissions: {
+          hasPutObject,
+          hasGetObject,
+          hasPutObjectAcl,
+          hasAllExpectedActions,
+          hasPublicAccess,
+        },
+        allActions: [...new Set(allActions)], // 去重
+        allPrincipals: [...new Set(allPrincipals)], // 去重
+        uploadTest: uploadTestResult,
+        analysis: {
+          policyStatus: hasPutObject
+            ? '✅ 策略包含 PutObject 权限'
+            : '❌ 策略缺少 PutObject 权限',
+          isEffective: hasPutObject && uploadTestResult?.success,
+          recommendations: this.getPolicyRecommendations(
+            hasPutObject,
+            hasGetObject,
+            hasPutObjectAcl,
+            hasPublicAccess,
+            uploadTestResult,
+          ),
+        },
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error: any) {
+      if (error.code === 'NoSuchBucketPolicy') {
+        return {
+          success: true,
+          bucket,
+          policyExists: false,
+          message: '存储桶策略未配置（可能依赖IAM策略）',
+          analysis: {
+            policyStatus: '⚠️ 存储桶策略未配置',
+            isEffective: null,
+            recommendations: [
+              '存储桶策略未配置，权限可能完全依赖IAM策略',
+              '如果上传失败，建议添加存储桶策略以明确允许 PutObject 操作',
+            ],
+          },
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      return {
+        success: false,
+        bucket,
+        error: error.code || 'Unknown',
+        errorMessage: error.message,
+        message: `无法检查存储桶策略: ${error.message}`,
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  private getPolicyRecommendations(
+    hasPutObject: boolean,
+    hasGetObject: boolean,
+    hasPutObjectAcl: boolean,
+    hasPublicAccess: boolean,
+    uploadTest: any,
+  ): string[] {
+    const recommendations: string[] = [];
+
+    if (!hasPutObject) {
+      recommendations.push('❌ 存储桶策略缺少 s3:PutObject 权限');
+      recommendations.push('   需要在策略中添加 s3:PutObject 操作');
+    } else {
+      recommendations.push('✅ 存储桶策略包含 s3:PutObject 权限');
+    }
+
+    if (!hasPutObjectAcl) {
+      recommendations.push('⚠️ 存储桶策略缺少 s3:PutObjectAcl 权限（可选，但建议添加）');
+    }
+
+    if (hasPublicAccess) {
+      recommendations.push('⚠️ 策略使用 Principal: "*"（公共访问）');
+      recommendations.push('   虽然允许上传，但建议限制为特定IAM用户以提高安全性');
+    }
+
+    if (uploadTest && !uploadTest.success) {
+      recommendations.push('❌ 实际上传测试失败');
+      recommendations.push(`   错误: ${uploadTest.error || uploadTest.errorMessage}`);
+      recommendations.push('   可能原因：');
+      recommendations.push('     1. 策略已更新但尚未生效（等待1-2分钟）');
+      recommendations.push('     2. IAM用户权限不足');
+      recommendations.push('     3. 存储桶阻止公共访问设置阻止了操作');
+    } else if (uploadTest && uploadTest.success) {
+      recommendations.push('✅ 实际上传测试成功 - 策略已生效！');
+    }
+
+    if (hasPutObject && uploadTest && uploadTest.success) {
+      recommendations.push('✅ 策略配置正确且已生效，上传功能应该可以正常工作');
     }
 
     return recommendations;
