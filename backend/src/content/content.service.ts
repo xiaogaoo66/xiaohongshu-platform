@@ -49,8 +49,17 @@ export class ContentService {
         return null;
       }
       
-      console.log(`✅ 从URL提取key成功: ${url} -> ${key}`);
-      return key;
+      // 解码 URL 编码的字符（S3 中存储的实际文件名可能是未编码的）
+      // 例如：%E9%87%91%E6%AF%9B%E5%B9%BC%E7%8A%AC -> 金毛幼犬
+      try {
+        const decodedKey = decodeURIComponent(key);
+        console.log(`✅ 从URL提取key成功: ${url} -> ${decodedKey} (原始: ${key})`);
+        return decodedKey;
+      } catch (decodeError) {
+        // 如果解码失败，使用原始 key
+        console.log(`✅ 从URL提取key成功（未解码）: ${url} -> ${key}`);
+        return key;
+      }
     } catch (error) {
       console.warn(`⚠️ 无法从URL提取S3 key: ${url}`, error);
       return null;

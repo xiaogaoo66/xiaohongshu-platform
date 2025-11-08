@@ -145,11 +145,53 @@ export class UploadService {
       key,
     });
     
+    // 尝试删除（先使用提供的 key）
     try {
       const result = await this.s3.deleteObject({
         Bucket: bucket,
         Key: key,
       }).promise();
+      
+      // 验证文件是否真的被删除了（等待一小段时间后检查）
+      try {
+        await new Promise(resolve => setTimeout(resolve, 500)); // 等待 500ms
+        
+        // 检查文件是否还存在
+        try {
+          await this.s3.headObject({
+            Bucket: bucket,
+            Key: key,
+          }).promise();
+          
+          // 如果文件还存在，说明删除可能失败了
+          console.warn(`⚠️ 删除后文件仍存在，可能删除失败: ${key}`);
+          
+          // 尝试使用编码后的 key 删除
+          const encodedKey = encodeURIComponent(key).replace(/%2F/g, '/');
+          if (encodedKey !== key) {
+            console.log(`🔄 尝试使用编码后的 key 删除: ${encodedKey}`);
+            try {
+              await this.s3.deleteObject({
+                Bucket: bucket,
+                Key: encodedKey,
+              }).promise();
+              console.log(`✅ 使用编码后的 key 删除成功: ${encodedKey}`);
+            } catch (encodedError: any) {
+              console.warn(`⚠️ 使用编码后的 key 删除也失败: ${encodedKey}`, encodedError.message);
+            }
+          }
+        } catch (headError: any) {
+          // 文件不存在，说明删除成功
+          if (headError.code === 'NotFound' || headError.code === '404') {
+            console.log(`✅ S3文件删除成功并已验证: ${key}`);
+          } else {
+            console.warn(`⚠️ 验证删除状态时出错: ${headError.message}`);
+          }
+        }
+      } catch (verifyError) {
+        // 验证过程出错，但不影响删除操作
+        console.warn(`⚠️ 验证删除状态失败:`, verifyError);
+      }
       
       console.log(`✅ S3文件删除成功:`, {
         bucket,
@@ -159,6 +201,34 @@ export class UploadService {
       
       return true;
     } catch (error: any) {
+      // 如果删除失败，尝试使用编码后的 key
+      if (error.code === 'NotFound' || error.code === 'NoSuchKey') {
+        // 文件不存在，尝试使用编码后的 key
+        const encodedKey = encodeURIComponent(key).replace(/%2F/g, '/');
+        if (encodedKey !== key) {
+          console.log(`🔄 文件不存在，尝试使用编码后的 key: ${encodedKey}`);
+          try {
+            await this.s3.deleteObject({
+              Bucket: bucket,
+              Key: encodedKey,
+            }).promise();
+            console.log(`✅ 使用编码后的 key 删除成功: ${encodedKey}`);
+            return true;
+          } catch (encodedError: any) {
+            if (encodedError.code === 'NotFound' || encodedError.code === 'NoSuchKey') {
+              console.warn(`⚠️ 文件不存在（已尝试编码和未编码两种格式）: ${key}`);
+              // 文件不存在不算错误，返回成功
+              return true;
+            }
+            throw encodedError;
+          }
+        } else {
+          // 文件不存在，不算错误
+          console.warn(`⚠️ 文件不存在: ${key}`);
+          return true;
+        }
+      }
+      
       console.error(`❌ S3文件删除失败:`, {
         bucket,
         key,
