@@ -1,10 +1,60 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateContentDto } from './dto/create-content.dto';
+import { UploadService } from '../upload/upload.service';
 
 @Injectable()
 export class ContentService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private uploadService: UploadService,
+  ) {}
+
+  /**
+   * 从S3 URL中提取key
+   * 例如: https://bucket.s3.region.amazonaws.com/uploads/file.jpg -> uploads/file.jpg
+   */
+  private extractS3Key(url: string): string | null {
+    try {
+      // 检查是否是S3 URL
+      if (!url.includes('.s3.') || !url.includes('.amazonaws.com')) {
+        return null;
+      }
+
+      const urlObj = new URL(url);
+      // 移除开头的斜杠
+      const key = urlObj.pathname.substring(1);
+      return key || null;
+    } catch (error) {
+      console.warn(`无法从URL提取S3 key: ${url}`, error);
+      return null;
+    }
+  }
+
+  /**
+   * 删除内容关联的S3图片文件
+   */
+  private async deleteS3Images(images: any): Promise<void> {
+    if (!images || !Array.isArray(images)) {
+      return;
+    }
+
+    // 遍历所有图片URL，删除S3中的文件
+    for (const imageUrl of images) {
+      if (typeof imageUrl === 'string') {
+        const key = this.extractS3Key(imageUrl);
+        if (key) {
+          try {
+            await this.uploadService.deleteFile(key);
+            console.log(`✅ 已删除S3文件: ${key}`);
+          } catch (error: any) {
+            // 记录错误但不抛出，避免影响主流程
+            console.warn(`⚠️ 删除S3文件失败: ${key}`, error.message);
+          }
+        }
+      }
+    }
+  }
 
   async create(createContentDto: CreateContentDto) {
     return this.prisma.content.create({
@@ -40,6 +90,13 @@ export class ContentService {
 
   async remove(id: string) {
     const content = await this.findOne(id);
+    
+    // 先删除S3中的图片文件
+    if (content.images) {
+      await this.deleteS3Images(content.images);
+    }
+    
+    // 然后删除数据库记录
     return this.prisma.content.delete({
       where: { id },
     });
@@ -51,6 +108,23 @@ export class ContentService {
     }
     
     try {
+      // 先查询要删除的内容，以便删除S3文件
+      const contentsToDelete = await this.prisma.content.findMany({
+        where: {
+          id: {
+            in: ids,
+          },
+        },
+      });
+
+      // 删除所有关联的S3图片文件
+      for (const content of contentsToDelete) {
+        if (content.images) {
+          await this.deleteS3Images(content.images);
+        }
+      }
+
+      // 然后删除数据库记录
       const result = await this.prisma.content.deleteMany({
         where: {
           id: {
@@ -83,7 +157,12 @@ export class ContentService {
       // 先保存要返回的内容
       const contentToReturn = { ...content };
       
-      // 立即删除记录（领取后自动删除）
+      // 先删除S3中的图片文件（在删除数据库记录之前）
+      if (content.images) {
+        await this.deleteS3Images(content.images);
+      }
+      
+      // 然后删除数据库记录（领取后自动删除）
       await tx.content.delete({
         where: { id: content.id },
       });
