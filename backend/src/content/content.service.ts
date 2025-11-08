@@ -12,21 +12,47 @@ export class ContentService {
 
   /**
    * 从S3 URL中提取key
-   * 例如: https://bucket.s3.region.amazonaws.com/uploads/file.jpg -> uploads/file.jpg
+   * 支持多种S3 URL格式：
+   * - https://bucket.s3.region.amazonaws.com/uploads/file.jpg
+   * - https://bucket.s3-region.amazonaws.com/uploads/file.jpg
+   * - https://s3.region.amazonaws.com/bucket/uploads/file.jpg
    */
   private extractS3Key(url: string): string | null {
     try {
       // 检查是否是S3 URL
-      if (!url.includes('.s3.') || !url.includes('.amazonaws.com')) {
+      if (!url || typeof url !== 'string') {
+        return null;
+      }
+
+      // 检查是否是S3 URL格式
+      if (!url.includes('amazonaws.com') && !url.includes('.s3.')) {
+        console.warn(`⚠️ 不是S3 URL格式: ${url}`);
         return null;
       }
 
       const urlObj = new URL(url);
       // 移除开头的斜杠
-      const key = urlObj.pathname.substring(1);
-      return key || null;
+      let key = urlObj.pathname.substring(1);
+      
+      // 如果是路径格式的URL (s3.region.amazonaws.com/bucket/key)，需要移除bucket部分
+      if (url.includes('s3.') && !url.includes('.s3.')) {
+        // 格式: https://s3.region.amazonaws.com/bucket/key
+        const parts = key.split('/');
+        if (parts.length > 1) {
+          // 移除bucket部分，保留key
+          key = parts.slice(1).join('/');
+        }
+      }
+      
+      if (!key) {
+        console.warn(`⚠️ 无法从URL提取key: ${url}`);
+        return null;
+      }
+      
+      console.log(`✅ 从URL提取key成功: ${url} -> ${key}`);
+      return key;
     } catch (error) {
-      console.warn(`无法从URL提取S3 key: ${url}`, error);
+      console.warn(`⚠️ 无法从URL提取S3 key: ${url}`, error);
       return null;
     }
   }
@@ -36,24 +62,43 @@ export class ContentService {
    */
   private async deleteS3Images(images: any): Promise<void> {
     if (!images || !Array.isArray(images)) {
+      console.warn('⚠️ deleteS3Images: images为空或不是数组', images);
       return;
     }
+
+    console.log(`🗑️ 开始删除S3图片，共 ${images.length} 张`);
+    
+    let successCount = 0;
+    let failCount = 0;
 
     // 遍历所有图片URL，删除S3中的文件
     for (const imageUrl of images) {
       if (typeof imageUrl === 'string') {
+        console.log(`🔍 处理图片URL: ${imageUrl}`);
         const key = this.extractS3Key(imageUrl);
         if (key) {
           try {
             await this.uploadService.deleteFile(key);
+            successCount++;
             console.log(`✅ 已删除S3文件: ${key}`);
           } catch (error: any) {
+            failCount++;
             // 记录错误但不抛出，避免影响主流程
-            console.warn(`⚠️ 删除S3文件失败: ${key}`, error.message);
+            console.error(`❌ 删除S3文件失败: ${key}`, {
+              error: error.message,
+              stack: error.stack,
+            });
           }
+        } else {
+          failCount++;
+          console.warn(`⚠️ 无法从URL提取key，跳过删除: ${imageUrl}`);
         }
+      } else {
+        console.warn(`⚠️ 图片URL不是字符串类型:`, imageUrl);
       }
     }
+    
+    console.log(`📊 S3图片删除完成: 成功 ${successCount} 张，失败 ${failCount} 张`);
   }
 
   async create(createContentDto: CreateContentDto) {
@@ -177,21 +222,35 @@ export class ContentService {
    * 真正删除数据库记录和S3图片
    */
   async confirmClaimed(contentId: string) {
+    console.log(`🗑️ 开始确认删除内容: ${contentId}`);
+    
     const content = await this.prisma.content.findUnique({
       where: { id: contentId },
     });
 
     if (!content) {
+      console.warn(`⚠️ 内容不存在: ${contentId}`);
       throw new NotFoundException('内容不存在');
     }
 
     if (!content.isClaimed) {
+      console.warn(`⚠️ 内容尚未被领取: ${contentId}`);
       throw new Error('该内容尚未被领取');
     }
 
+    const imagesArray = Array.isArray(content.images) ? content.images : [];
+    console.log(`📋 内容信息:`, {
+      id: content.id,
+      imagesCount: imagesArray.length,
+      images: content.images,
+    });
+
     // 先删除S3中的图片文件
-    if (content.images) {
-      await this.deleteS3Images(content.images);
+    if (imagesArray.length > 0) {
+      console.log(`🗑️ 开始删除S3图片...`);
+      await this.deleteS3Images(imagesArray);
+    } else {
+      console.warn(`⚠️ 内容没有图片或图片数组为空: ${contentId}`);
     }
 
     // 然后删除数据库记录
@@ -199,6 +258,7 @@ export class ContentService {
       where: { id: contentId },
     });
 
+    console.log(`✅ 内容已确认删除: ${contentId}`);
     return { message: '内容已确认删除' };
   }
 

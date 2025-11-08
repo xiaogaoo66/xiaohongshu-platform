@@ -132,13 +132,40 @@ export class UploadService {
   async deleteFile(key: string) {
     const bucket = this.configService.get<string>('AWS_S3_BUCKET');
     
+    if (!this.s3) {
+      throw new Error('S3客户端未初始化，无法删除文件');
+    }
+    
+    if (!bucket) {
+      throw new Error('AWS_S3_BUCKET 环境变量未配置');
+    }
+    
+    console.log(`🗑️ 尝试删除S3文件:`, {
+      bucket,
+      key,
+    });
+    
     try {
-      await this.s3.deleteObject({
+      const result = await this.s3.deleteObject({
         Bucket: bucket,
         Key: key,
       }).promise();
+      
+      console.log(`✅ S3文件删除成功:`, {
+        bucket,
+        key,
+        result,
+      });
+      
       return true;
-    } catch (error) {
+    } catch (error: any) {
+      console.error(`❌ S3文件删除失败:`, {
+        bucket,
+        key,
+        error: error.message,
+        code: error.code,
+        stack: error.stack,
+      });
       throw new Error(`删除文件失败: ${error.message}`);
     }
   }
