@@ -69,7 +69,14 @@ const UserClaim: React.FC = () => {
 
   // 确认已领取（图片加载完成后自动调用，删除数据库和S3图片）
   const confirmClaimedMutation = useMutation({
-    mutationFn: (contentId: string) => contentAPI.confirmClaimed(contentId),
+    mutationFn: (contentId: string) => {
+      // 前端验证：确保 contentId 有效
+      if (!contentId || typeof contentId !== 'string' || contentId.trim() === '') {
+        console.warn('⚠️ 尝试确认删除时 contentId 无效:', contentId)
+        throw new Error('contentId 无效')
+      }
+      return contentAPI.confirmClaimed(contentId)
+    },
     onSuccess: () => {
       console.log('✅ 内容已确认删除（数据库和S3图片）')
       queryClient.invalidateQueries({ queryKey: ['contentCount'] })

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateContentDto } from './dto/create-content.dto';
 import { UploadService } from '../upload/upload.service';
@@ -222,6 +222,12 @@ export class ContentService {
    * 真正删除数据库记录和S3图片
    */
   async confirmClaimed(contentId: string) {
+    // 参数验证：在调用 Prisma 之前检查
+    if (!contentId || typeof contentId !== 'string' || contentId.trim() === '') {
+      console.warn(`⚠️ confirmClaimed 收到无效的 contentId: ${contentId}`);
+      throw new BadRequestException('contentId 参数不能为空或无效');
+    }
+
     console.log(`🗑️ 开始确认删除内容: ${contentId}`);
     
     const content = await this.prisma.content.findUnique({

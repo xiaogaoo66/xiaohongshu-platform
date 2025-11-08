@@ -8,6 +8,7 @@ import {
   Delete,
   UseGuards,
   Request,
+  BadRequestException,
 } from '@nestjs/common';
 import { ContentService } from './content.service';
 import { CreateContentDto } from './dto/create-content.dto';
@@ -78,6 +79,9 @@ export class ContentController {
 
   @Post('content/confirm-claimed')
   confirmClaimed(@Body() body: { contentId: string }) {
+    if (!body?.contentId) {
+      throw new BadRequestException('contentId 参数不能为空');
+    }
     return this.contentService.confirmClaimed(body.contentId);
   }
 }
