@@ -11,7 +11,7 @@ const { Title, Paragraph } = Typography
 
 const UserClaim: React.FC = () => {
   const [claimedContent, setClaimedContent] = useState<Content | null>(null)
-  const [loadedImagesCount, setLoadedImagesCount] = useState(0)
+  const [, setLoadedImagesCount] = useState(0) // 使用函数式更新，不需要读取当前值
   const [hasConfirmedDelete, setHasConfirmedDelete] = useState(false)
   const queryClient = useQueryClient()
 
