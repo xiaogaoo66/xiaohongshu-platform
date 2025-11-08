@@ -98,6 +98,13 @@ const UserClaim: React.FC = () => {
     }
   }
 
+  const handleCopyTitle = () => {
+    if (claimedContent?.title) {
+      copy(claimedContent.title)
+      message.success('标题已复制到剪贴板')
+    }
+  }
+
   // 图片加载完成后的处理（自动确认删除）
   const handleImageLoad = () => {
     if (!claimedContent?.id || hasConfirmedDelete) {
@@ -222,6 +229,14 @@ const UserClaim: React.FC = () => {
               <Title level={3} style={{ marginTop: '8px', marginBottom: 0 }}>
                 {claimedContent.title}
               </Title>
+              <Button
+                type="primary"
+                icon={<CopyOutlined />}
+                onClick={handleCopyTitle}
+                style={{ marginTop: '12px' }}
+              >
+                复制标题
+              </Button>
             </div>
           )}
 
@@ -294,7 +309,7 @@ const UserClaim: React.FC = () => {
           <li>每次只能领取一组内容，包含多张图片和对应文案</li>
           <li>领取后的内容会自动从系统中删除，确保唯一性</li>
           <li>点击图片可以放大预览，长按图片可以保存到手机</li>
-          <li>支持文案一键复制功能</li>
+          <li>支持标题和文案一键复制功能</li>
           <li>同一IP地址10秒内只能领取一次，防止恶意刷取</li>
           <li>内容仅供个人学习使用，请勿用于商业用途</li>
         </ul>
