@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import { Button, Card, Image, message, Spin, Typography, Statistic, Row, Col } from 'antd'
 import { CopyOutlined, GiftOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -11,6 +11,8 @@ const { Title, Paragraph } = Typography
 
 const UserClaim: React.FC = () => {
   const [claimedContent, setClaimedContent] = useState<Content | null>(null)
+  const [loadedImagesCount, setLoadedImagesCount] = useState(0)
+  const [hasConfirmedDelete, setHasConfirmedDelete] = useState(false)
   const queryClient = useQueryClient()
 
   // 获取剩余内容数量
@@ -51,6 +53,8 @@ const UserClaim: React.FC = () => {
     mutationFn: () => contentAPI.claimContent().then(res => res.data),
     onSuccess: (data: Content) => {
       setClaimedContent(data)
+      setLoadedImagesCount(0) // 重置加载计数
+      setHasConfirmedDelete(false) // 重置确认删除标志
       message.success('内容领取成功！')
       queryClient.invalidateQueries({ queryKey: ['contentCount'] })
     },
@@ -60,6 +64,19 @@ const UserClaim: React.FC = () => {
       } else {
         message.error('领取失败，请稍后重试')
       }
+    },
+  })
+
+  // 确认已领取（图片加载完成后自动调用，删除数据库和S3图片）
+  const confirmClaimedMutation = useMutation({
+    mutationFn: (contentId: string) => contentAPI.confirmClaimed(contentId),
+    onSuccess: () => {
+      console.log('✅ 内容已确认删除（数据库和S3图片）')
+      queryClient.invalidateQueries({ queryKey: ['contentCount'] })
+    },
+    onError: (error: any) => {
+      // 静默处理错误，不影响用户体验
+      console.warn('确认删除失败:', error)
     },
   })
 
@@ -73,6 +90,59 @@ const UserClaim: React.FC = () => {
       message.success('文案已复制到剪贴板')
     }
   }
+
+  // 图片加载完成后的处理（自动确认删除）
+  const handleImageLoad = () => {
+    if (!claimedContent?.id || hasConfirmedDelete) {
+      return
+    }
+
+    setLoadedImagesCount(prev => {
+      const newCount = prev + 1
+      const totalImages = claimedContent.images?.length || 0
+      
+      // 当所有图片都加载完成后，确认删除
+      if (newCount >= totalImages && totalImages > 0) {
+        setHasConfirmedDelete(true)
+        // 使用 setTimeout 确保用户能看到图片后再删除
+        setTimeout(() => {
+          confirmClaimedMutation.mutate(claimedContent.id)
+        }, 2000) // 延迟2秒，确保用户能看到图片
+      }
+      
+      return newCount
+    })
+  }
+
+  // 继续领取：清空状态（图片已在加载完成后自动删除）
+  const handleContinueClaim = () => {
+    setClaimedContent(null)
+    setLoadedImagesCount(0)
+    setHasConfirmedDelete(false)
+  }
+
+  // 页面卸载时，如果还有已领取的内容，确认删除
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (claimedContent?.id) {
+        // 使用 sendBeacon 确保请求能发送（即使页面正在关闭）
+        const apiUrl = `${import.meta.env.VITE_API_BASE_URL || '/api'}/content/confirm-claimed`
+        navigator.sendBeacon(
+          apiUrl,
+          JSON.stringify({ contentId: claimedContent.id })
+        )
+      }
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+      // 组件卸载时也尝试确认删除
+      if (claimedContent?.id) {
+        confirmClaimedMutation.mutate(claimedContent.id)
+      }
+    }
+  }, [claimedContent])
 
 
   if (countLoading) {
@@ -133,6 +203,7 @@ const UserClaim: React.FC = () => {
                 alt={`内容图片 ${index + 1}`}
                 className="claim-image"
                 preview={true}
+                onLoad={handleImageLoad}
               />
             ))}
           </div>
@@ -166,7 +237,7 @@ const UserClaim: React.FC = () => {
             <Button
               size="large"
               icon={<ReloadOutlined />}
-              onClick={() => setClaimedContent(null)}
+              onClick={handleContinueClaim}
             >
               继续领取
             </Button>

@@ -109,6 +109,10 @@ export const contentAPI = {
   // 用户接口
   claimContent: () => api.get('/content/claim'),
   getContentCount: () => api.get('/content/count'),
+  deleteContentImages: (imageUrls: string[]) => 
+    api.post('/content/delete-images', { imageUrls }),
+  confirmClaimed: (contentId: string) => 
+    api.post('/content/confirm-claimed', { contentId }),
 }
 
 // 上传API

@@ -63,15 +63,16 @@ export class ContentService {
   }
 
   async findAll() {
-    // 领取后会自动删除，所以所有记录都是未领取的
-    // 明确不设置任何限制，返回所有记录
+    // 只返回未领取的内容
     const contents = await this.prisma.content.findMany({
+      where: {
+        isClaimed: false,
+      },
       orderBy: { createdAt: 'desc' },
-      // 不设置 take，返回所有记录
     });
     
     // 添加日志以调试
-    console.log(`[ContentService] findAll: 返回 ${contents.length} 条记录`);
+    console.log(`[ContentService] findAll: 返回 ${contents.length} 条未领取记录`);
     
     return contents;
   }
@@ -143,10 +144,13 @@ export class ContentService {
   }
 
   async claimRandom() {
-    // 使用事务确保原子性操作（查找并删除）
+    // 使用事务确保原子性操作（查找并标记为已领取）
     return this.prisma.$transaction(async (tx) => {
-      // 查找一条记录（领取后会自动删除，所以所有记录都是可领取的）
+      // 只查找未领取的内容
       const content = await tx.content.findFirst({
+        where: {
+          isClaimed: false,
+        },
         orderBy: { createdAt: 'asc' }, // 按创建时间排序，最早创建的优先
       });
 
@@ -154,38 +158,84 @@ export class ContentService {
         throw new NotFoundException('没有可领取的内容');
       }
 
-      // 先保存要返回的内容
-      const contentToReturn = { ...content };
-      
-      // 先删除S3中的图片文件（在删除数据库记录之前）
-      if (content.images) {
-        await this.deleteS3Images(content.images);
-      }
-      
-      // 然后删除数据库记录（领取后自动删除）
-      await tx.content.delete({
+      // 标记为已领取，但不删除数据库记录和S3图片
+      // 用户查看完内容后，图片加载完成时会调用 confirmClaimed 真正删除
+      const updatedContent = await tx.content.update({
         where: { id: content.id },
+        data: {
+          isClaimed: true,
+          claimedAt: new Date(),
+        },
       });
 
-      return contentToReturn;
+      return updatedContent;
     });
   }
 
+  /**
+   * 确认已领取的内容（用户查看完后调用）
+   * 真正删除数据库记录和S3图片
+   */
+  async confirmClaimed(contentId: string) {
+    const content = await this.prisma.content.findUnique({
+      where: { id: contentId },
+    });
+
+    if (!content) {
+      throw new NotFoundException('内容不存在');
+    }
+
+    if (!content.isClaimed) {
+      throw new Error('该内容尚未被领取');
+    }
+
+    // 先删除S3中的图片文件
+    if (content.images) {
+      await this.deleteS3Images(content.images);
+    }
+
+    // 然后删除数据库记录
+    await this.prisma.content.delete({
+      where: { id: contentId },
+    });
+
+    return { message: '内容已确认删除' };
+  }
+
+  /**
+   * 根据图片URL数组删除S3中的图片文件
+   * 用于用户查看完内容后删除图片（保留用于兼容性）
+   */
+  async deleteImagesByUrls(imageUrls: string[]): Promise<void> {
+    if (!imageUrls || !Array.isArray(imageUrls) || imageUrls.length === 0) {
+      return;
+    }
+
+    await this.deleteS3Images(imageUrls);
+  }
+
   async getCount() {
-    // 领取后会自动删除，所以直接统计总数即可
-    const count = await this.prisma.content.count();
+    // 只统计未领取的内容数量
+    const count = await this.prisma.content.count({
+      where: {
+        isClaimed: false,
+      },
+    });
     return { count };
   }
 
   async getStats() {
-    // 由于领取后会自动删除，所以总内容数 = 未领取数
     const total = await this.prisma.content.count();
-    const unclaimed = total;
+    const unclaimed = await this.prisma.content.count({
+      where: {
+        isClaimed: false,
+      },
+    });
+    const claimed = total - unclaimed;
     
-    // 已领取的内容会被删除，无法统计
     return {
       total,
-      claimed: 0, // 已领取的内容已被删除，无法统计
+      claimed,
       unclaimed,
     };
   }

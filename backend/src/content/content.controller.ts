@@ -70,4 +70,14 @@ export class ContentController {
   getCount() {
     return this.contentService.getCount();
   }
+
+  @Post('content/delete-images')
+  deleteImages(@Body() body: { imageUrls: string[] }) {
+    return this.contentService.deleteImagesByUrls(body.imageUrls || []);
+  }
+
+  @Post('content/confirm-claimed')
+  confirmClaimed(@Body() body: { contentId: string }) {
+    return this.contentService.confirmClaimed(body.contentId);
+  }
 }
