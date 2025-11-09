@@ -7,21 +7,22 @@ export default defineConfig({
   build: {
     // 使用默认压缩（esbuild，更稳定）
     minify: 'esbuild',
-    // 代码分割优化（简化配置，避免运行时错误）
+    // 代码分割优化（确保 React 和依赖它的库在同一个 chunk）
     rollupOptions: {
       output: {
-        // 手动分割代码，减少首次加载大小
+        // 手动分割代码，确保依赖顺序正确
         manualChunks: (id) => {
           // 将 node_modules 中的包单独打包
           if (id.includes('node_modules')) {
-            if (id.includes('react') || id.includes('react-dom') || id.includes('react-router')) {
+            // React 和所有依赖 React 的库放在一起，确保加载顺序
+            if (
+              id.includes('react') || 
+              id.includes('react-dom') || 
+              id.includes('react-router') ||
+              id.includes('antd') ||
+              id.includes('@tanstack/react-query')
+            ) {
               return 'react-vendor'
-            }
-            if (id.includes('antd')) {
-              return 'antd-vendor'
-            }
-            if (id.includes('@tanstack/react-query')) {
-              return 'query-vendor'
             }
             // 其他第三方库
             return 'vendor'
