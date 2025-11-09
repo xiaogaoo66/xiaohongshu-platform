@@ -218,6 +218,20 @@ const UserClaim: React.FC = () => {
                 className="claim-image"
                 preview={true}
                 onLoad={handleImageLoad}
+                loading="lazy"
+                placeholder={
+                  <div style={{ 
+                    width: '100%', 
+                    height: '200px', 
+                    background: '#f0f0f0',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: '8px'
+                  }}>
+                    <Spin />
+                  </div>
+                }
               />
             ))}
           </div>

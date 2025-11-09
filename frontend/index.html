@@ -9,10 +9,16 @@
     <!-- DNS 预解析：加快 DNS 解析速度 -->
     <link rel="dns-prefetch" href="https://www.acgmbti.online" />
     <link rel="dns-prefetch" href="https://xiaohongshu-platform-production.up.railway.app" />
+    <!-- AWS S3 预解析（如果使用 S3 存储图片） -->
+    <link rel="dns-prefetch" href="https://s3.amazonaws.com" />
     
     <!-- 预连接：提前建立连接 -->
     <link rel="preconnect" href="https://www.acgmbti.online" />
     <link rel="preconnect" href="https://xiaohongshu-platform-production.up.railway.app" crossorigin />
+    
+    <!-- 性能优化：减少渲染阻塞 -->
+    <meta name="theme-color" content="#1890ff" />
+    <meta name="description" content="小红书内容分发平台 - 快速领取精美内容" />
   </head>
   <body>
     <div id="root"></div>

@@ -11,24 +11,33 @@ export default defineConfig({
       compress: {
         drop_console: true, // 移除 console
         drop_debugger: true, // 移除 debugger
+        pure_funcs: ['console.log', 'console.info'], // 移除特定函数调用
       },
     },
     // 代码分割优化
     rollupOptions: {
       output: {
         // 手动分割代码，减少首次加载大小
-        manualChunks: {
-          // 将 React 相关库单独打包
-          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
-          // 将 Ant Design 单独打包（通常较大）
-          'antd-vendor': ['antd'],
-          // 将其他第三方库打包
-          'vendor': ['axios', '@tanstack/react-query', 'dayjs'],
+        manualChunks: (id) => {
+          // 将 node_modules 中的包单独打包
+          if (id.includes('node_modules')) {
+            if (id.includes('react') || id.includes('react-dom') || id.includes('react-router')) {
+              return 'react-vendor'
+            }
+            if (id.includes('antd')) {
+              return 'antd-vendor'
+            }
+            if (id.includes('@tanstack/react-query')) {
+              return 'query-vendor'
+            }
+            // 其他第三方库
+            return 'vendor'
+          }
         },
-        // 优化文件名
-        assetFileNames: 'assets/[name]-[hash][extname]',
-        chunkFileNames: 'assets/[name]-[hash].js',
-        entryFileNames: 'assets/[name]-[hash].js',
+        // 优化文件名，使用更短的 hash
+        assetFileNames: 'assets/[name]-[hash:8][extname]',
+        chunkFileNames: 'assets/[name]-[hash:8].js',
+        entryFileNames: 'assets/[name]-[hash:8].js',
       },
     },
     // 启用 gzip 压缩报告
@@ -37,6 +46,12 @@ export default defineConfig({
     chunkSizeWarningLimit: 1000,
     // 启用 sourcemap（生产环境可以关闭以减小文件大小）
     sourcemap: false,
+    // 启用 CSS 代码分割
+    cssCodeSplit: true,
+    // 优化构建目标
+    target: 'es2015',
+    // 启用压缩
+    cssMinify: true,
   },
   server: {
     host: true, // 允许局域网/手机访问

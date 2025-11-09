@@ -447,6 +447,7 @@ const AdminDashboard: React.FC = () => {
                 width={40}
                 height={40}
                 style={{ objectFit: 'cover', borderRadius: 4 }}
+                loading="lazy"
               />
             ))}
             {images.length > 3 && <Text>+{images.length - 3}</Text>}
