@@ -218,7 +218,6 @@ const UserClaim: React.FC = () => {
                 className="claim-image"
                 preview={true}
                 onLoad={handleImageLoad}
-                loading="lazy"
                 placeholder={
                   <div style={{ 
                     width: '100%', 
