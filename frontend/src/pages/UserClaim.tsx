@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react'
 import { Button, Card, Image, message, Spin, Typography, Statistic, Row, Col } from 'antd'
-import { CopyOutlined, GiftOutlined, ReloadOutlined } from '@ant-design/icons'
+import { CopyOutlined, GiftOutlined, ReloadOutlined, DownloadOutlined } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { contentAPI } from '../services/api'
 import { Content } from '../types'
@@ -13,7 +13,50 @@ const UserClaim: React.FC = () => {
   const [claimedContent, setClaimedContent] = useState<Content | null>(null)
   const [, setLoadedImagesCount] = useState(0) // 使用函数式更新，不需要读取当前值
   const [hasConfirmedDelete, setHasConfirmedDelete] = useState(false)
+  const [downloadingIndex, setDownloadingIndex] = useState<number | null>(null)
   const queryClient = useQueryClient()
+  const isAndroid = useMemo(
+    () => typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent),
+    []
+  )
+
+  const handleDownloadImage = async (imageUrl: string, index: number) => {
+    if (!imageUrl) {
+      return
+    }
+
+    try {
+      setDownloadingIndex(index)
+      const response = await fetch(imageUrl, { mode: 'cors' })
+
+      if (!response.ok) {
+        throw new Error(`Failed to download image: ${response.status}`)
+      }
+
+      const blob = await response.blob()
+      const blobUrl = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      const urlParts = imageUrl.split('.')
+      const extension = urlParts.length > 1 ? urlParts[urlParts.length - 1].split('?')[0] : 'jpg'
+      const fileName = `content-${claimedContent?.id || 'image'}-${index + 1}.${extension}`
+
+      link.href = blobUrl
+      link.download = fileName
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(blobUrl)
+      message.success('图片已开始下载')
+    } catch (error) {
+      console.error('下载图片失败:', error)
+      message.error('下载失败，请稍后再试')
+    } finally {
+      setTimeout(() => {
+        setDownloadingIndex(null)
+      }, 300)
+    }
+  }
+
 
   // 获取剩余内容数量
   const { data: contentCountData, isLoading: countLoading, error: countError } = useQuery({
@@ -211,27 +254,44 @@ const UserClaim: React.FC = () => {
           {/* 图片展示 */}
           <div className="claim-images">
             {claimedContent.images.map((imageUrl, index) => (
-              <Image
-                key={index}
-                src={imageUrl}
-                alt={`内容图片 ${index + 1}`}
-                className="claim-image"
-                preview={true}
-                onLoad={handleImageLoad}
-                placeholder={
-                  <div style={{ 
-                    width: '100%', 
-                    height: '200px', 
-                    background: '#f0f0f0',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    borderRadius: '8px'
-                  }}>
-                    <Spin />
+              <div className="claim-image-wrapper" key={index}>
+                <Image
+                  src={imageUrl}
+                  alt={`内容图片 ${index + 1}`}
+                  className="claim-image"
+                  preview={true}
+                  onLoad={handleImageLoad}
+                  placeholder={
+                    <div
+                      style={{
+                        width: '100%',
+                        height: '200px',
+                        background: '#f0f0f0',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: '8px',
+                      }}
+                    >
+                      <Spin />
+                    </div>
+                  }
+                />
+                {isAndroid && (
+                  <div className="download-actions">
+                    <Button
+                      type="primary"
+                      icon={<DownloadOutlined />}
+                      block
+                      loading={downloadingIndex === index}
+                      onClick={() => handleDownloadImage(imageUrl, index)}
+                    >
+                      安卓下载
+                    </Button>
+                    <span className="download-hint">下载功能仅限安卓用户使用</span>
                   </div>
-                }
-              />
+                )}
+              </div>
             ))}
           </div>
 
@@ -321,7 +381,7 @@ const UserClaim: React.FC = () => {
         <ul style={{ textAlign: 'left', lineHeight: '1.8' }}>
           <li>每次只能领取一组内容，包含多张图片和对应文案</li>
           <li>领取后的内容会自动从系统中删除，确保唯一性</li>
-          <li>点击图片可以放大预览，长按图片可以保存到手机</li>
+          <li>点击图片可以放大预览；安卓用户请使用图片下方的下载按钮保存</li>
           <li>支持标题和文案一键复制功能</li>
           <li>同一IP地址10秒内只能领取一次，防止恶意刷取</li>
           <li>内容仅供个人学习使用，请勿用于商业用途</li>
