@@ -113,6 +113,11 @@ export const contentAPI = {
     api.post('/content/delete-images', { imageUrls }),
   confirmClaimed: (contentId: string) => 
     api.post('/content/confirm-claimed', { contentId }),
+  downloadImage: (imageUrl: string) =>
+    api.get('/content/download', {
+      params: { url: imageUrl },
+      responseType: 'blob',
+    }),
 }
 
 // 上传API

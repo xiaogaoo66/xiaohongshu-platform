@@ -2,6 +2,8 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateContentDto } from './dto/create-content.dto';
 import { UploadService } from '../upload/upload.service';
+import * as https from 'https';
+import * as http from 'http';
 
 @Injectable()
 export class ContentService {
@@ -313,5 +315,65 @@ export class ContentService {
       claimed,
       unclaimed,
     };
+  }
+
+  /**
+   * 为前端提供图片下载代理，解决安卓端因跨域导致的下载失败问题
+   */
+  async getContentDownloadStream(imageUrl: string) {
+    if (!imageUrl || typeof imageUrl !== 'string') {
+      throw new BadRequestException('图片地址不能为空');
+    }
+
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(imageUrl);
+    } catch (error) {
+      console.warn(`⚠️ 无效的图片URL: ${imageUrl}`, error);
+      throw new BadRequestException('图片地址无效');
+    }
+
+    if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
+      throw new BadRequestException('仅支持 http/https 协议的图片地址');
+    }
+
+    const requestModule = parsedUrl.protocol === 'https:' ? https : http;
+
+    try {
+      const stream = await new Promise<http.IncomingMessage>((resolve, reject) => {
+        const request = requestModule.get(imageUrl, (response) => {
+          const statusCode = response.statusCode ?? 500;
+
+          if (statusCode >= 400) {
+            const statusMessage = response.statusMessage ?? 'Unknown error';
+            response.resume(); // 消耗响应数据以释放内存
+            reject(new Error(`下载失败: ${statusCode} ${statusMessage}`));
+            return;
+          }
+
+          resolve(response);
+        });
+
+        request.on('error', (err) => {
+          reject(err);
+        });
+      });
+
+      const contentType = stream.headers['content-type'] || 'application/octet-stream';
+      const contentLength = stream.headers['content-length'];
+      const filename = decodeURIComponent(parsedUrl.pathname.split('/').pop() || 'content-image');
+
+      return {
+        stream,
+        contentType,
+        contentLength,
+        filename,
+      };
+    } catch (error: any) {
+      console.error(`❌ 获取图片流失败: ${imageUrl}`, {
+        error: error.message,
+      });
+      throw new NotFoundException('图片下载失败，请稍后再试');
+    }
   }
 }

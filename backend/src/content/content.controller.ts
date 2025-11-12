@@ -3,18 +3,19 @@ import {
   Get,
   Post,
   Body,
-  Patch,
   Param,
   Delete,
   UseGuards,
-  Request,
   BadRequestException,
+  Query,
+  Res,
 } from '@nestjs/common';
 import { ContentService } from './content.service';
 import { CreateContentDto } from './dto/create-content.dto';
 import { BatchDeleteDto } from './dto/batch-delete.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ThrottlerGuard } from '@nestjs/throttler';
+import { Response } from 'express';
 
 @Controller('api')
 export class ContentController {
@@ -83,5 +84,41 @@ export class ContentController {
       throw new BadRequestException('contentId 参数不能为空');
     }
     return this.contentService.confirmClaimed(body.contentId);
+  }
+
+  @Get('content/download')
+  async downloadImage(
+    @Query('url') url: string,
+    @Res() res: Response,
+  ) {
+    if (!url) {
+      throw new BadRequestException('url 参数不能为空');
+    }
+
+    const { stream, contentType, contentLength, filename } =
+      await this.contentService.getContentDownloadStream(url);
+
+    res.setHeader('Content-Type', contentType);
+
+    if (contentLength) {
+      res.setHeader('Content-Length', contentLength);
+    }
+
+    const encodedFilename = encodeURIComponent(filename).replace(/%20/g, '+');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${encodedFilename}"; filename*=UTF-8''${encodedFilename}`,
+    );
+
+    stream.on('error', (error) => {
+      console.error('❌ 图片流传输失败:', error);
+      if (!res.headersSent) {
+        res.status(500).send('图片下载失败');
+      } else {
+        res.end();
+      }
+    });
+
+    stream.pipe(res);
   }
 }

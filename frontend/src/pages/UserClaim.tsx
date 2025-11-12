@@ -27,18 +27,35 @@ const UserClaim: React.FC = () => {
 
     try {
       setDownloadingIndex(index)
-      const response = await fetch(imageUrl, { mode: 'cors' })
-
-      if (!response.ok) {
-        throw new Error(`Failed to download image: ${response.status}`)
-      }
-
-      const blob = await response.blob()
+      const response = await contentAPI.downloadImage(imageUrl)
+      const blob = response.data
+      const headers = response.headers as Record<string, string | undefined>
       const blobUrl = window.URL.createObjectURL(blob)
       const link = document.createElement('a')
-      const urlParts = imageUrl.split('.')
-      const extension = urlParts.length > 1 ? urlParts[urlParts.length - 1].split('?')[0] : 'jpg'
-      const fileName = `content-${claimedContent?.id || 'image'}-${index + 1}.${extension}`
+      const disposition = headers['content-disposition'] || headers['Content-Disposition']
+
+      let fileName = `content-${claimedContent?.id || 'image'}-${index + 1}`
+      if (disposition) {
+        const fileNameMatch = disposition.match(/filename\*?=(?:UTF-8''|")(.*?)(?:\"|$)/i)
+        if (fileNameMatch && fileNameMatch[1]) {
+          try {
+            fileName = decodeURIComponent(fileNameMatch[1])
+          } catch (error) {
+            fileName = fileNameMatch[1]
+          }
+        }
+      }
+
+      const extensionMatch = fileName.match(/\.[a-zA-Z0-9]+$/)
+      if (!extensionMatch) {
+        const contentType = headers['content-type'] || headers['Content-Type']
+        const extensionFromType = contentType?.split('/')[1]
+        if (extensionFromType) {
+          fileName = `${fileName}.${extensionFromType}`
+        } else {
+          fileName = `${fileName}.jpg`
+        }
+      }
 
       link.href = blobUrl
       link.download = fileName
