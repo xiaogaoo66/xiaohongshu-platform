@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react'
 import { Button, Card, Image, message, Spin, Typography, Statistic, Row, Col } from 'antd'
-import { CopyOutlined, GiftOutlined, ReloadOutlined, DownloadOutlined } from '@ant-design/icons'
+import { CopyOutlined, GiftOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { contentAPI } from '../services/api'
 import { Content } from '../types'
@@ -13,66 +13,7 @@ const UserClaim: React.FC = () => {
   const [claimedContent, setClaimedContent] = useState<Content | null>(null)
   const [, setLoadedImagesCount] = useState(0) // 使用函数式更新，不需要读取当前值
   const [hasConfirmedDelete, setHasConfirmedDelete] = useState(false)
-  const [downloadingIndex, setDownloadingIndex] = useState<number | null>(null)
   const queryClient = useQueryClient()
-  const isAndroid = useMemo(
-    () => typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent),
-    []
-  )
-
-  const handleDownloadImage = async (imageUrl: string, index: number) => {
-    if (!imageUrl) {
-      return
-    }
-
-    try {
-      setDownloadingIndex(index)
-      const response = await contentAPI.downloadImage(imageUrl)
-      const blob = response.data
-      const headers = response.headers as Record<string, string | undefined>
-      const blobUrl = window.URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      const disposition = headers['content-disposition'] || headers['Content-Disposition']
-
-      let fileName = `content-${claimedContent?.id || 'image'}-${index + 1}`
-      if (disposition) {
-        const fileNameMatch = disposition.match(/filename\*?=(?:UTF-8''|")(.*?)(?:\"|$)/i)
-        if (fileNameMatch && fileNameMatch[1]) {
-          try {
-            fileName = decodeURIComponent(fileNameMatch[1])
-          } catch (error) {
-            fileName = fileNameMatch[1]
-          }
-        }
-      }
-
-      const extensionMatch = fileName.match(/\.[a-zA-Z0-9]+$/)
-      if (!extensionMatch) {
-        const contentType = headers['content-type'] || headers['Content-Type']
-        const extensionFromType = contentType?.split('/')[1]
-        if (extensionFromType) {
-          fileName = `${fileName}.${extensionFromType}`
-        } else {
-          fileName = `${fileName}.jpg`
-        }
-      }
-
-      link.href = blobUrl
-      link.download = fileName
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      window.URL.revokeObjectURL(blobUrl)
-      message.success('图片已开始下载')
-    } catch (error) {
-      console.error('下载图片失败:', error)
-      message.error('下载失败，请稍后再试')
-    } finally {
-      setTimeout(() => {
-        setDownloadingIndex(null)
-      }, 300)
-    }
-  }
 
 
   // 获取剩余内容数量
@@ -294,20 +235,6 @@ const UserClaim: React.FC = () => {
                     </div>
                   }
                 />
-                {isAndroid && (
-                  <div className="download-actions">
-                    <Button
-                      type="primary"
-                      icon={<DownloadOutlined />}
-                      block
-                      loading={downloadingIndex === index}
-                      onClick={() => handleDownloadImage(imageUrl, index)}
-                    >
-                      安卓下载
-                    </Button>
-                    <span className="download-hint">下载功能仅限安卓用户使用</span>
-                  </div>
-                )}
               </div>
             ))}
           </div>
@@ -398,7 +325,7 @@ const UserClaim: React.FC = () => {
         <ul style={{ textAlign: 'left', lineHeight: '1.8' }}>
           <li>每次只能领取一组内容，包含多张图片和对应文案</li>
           <li>领取后的内容会自动从系统中删除，确保唯一性</li>
-          <li>点击图片可以放大预览；安卓用户请使用图片下方的下载按钮保存</li>
+          <li>点击图片可以放大预览</li>
           <li>支持标题和文案一键复制功能</li>
           <li>同一IP地址10秒内只能领取一次，防止恶意刷取</li>
           <li>内容仅供个人学习使用，请勿用于商业用途</li>
