@@ -160,7 +160,7 @@ const AdminDashboard: React.FC = () => {
           throw new Error('上传地址格式不正确')
         }
         
-        // 上传到S3
+        // 上传到 OSS（兼容 S3 旧逻辑）
         // 重要：预签名URL的签名是基于特定的请求头和参数生成的
         // 必须确保上传时的请求头与生成签名时一致
         
@@ -280,17 +280,17 @@ const AdminDashboard: React.FC = () => {
               '可能原因2: IAM权限不足': {
                 status: '✅ 已排除（用户已检查）',
                 details: {
-                  '需要权限': 's3:PutObject',
-                  '建议': '如果已确认IAM权限正确，请检查存储桶策略',
+                  '需要权限': 'oss:PutObject',
+                  '建议': '如果已确认 RAM 权限正确，请检查 Bucket 策略',
                 },
               },
               '可能原因3: 存储桶策略限制': {
                 status: '⚠️ 最可能的原因',
                 details: {
-                  '问题': '存储桶策略可能只允许 s3:GetObject（读取），不允许 s3:PutObject（上传）',
-                  '检查方法': '1. 登录 AWS 控制台\n2. 进入 S3 服务\n3. 选择存储桶\n4. 查看"权限" -> "存储桶策略"\n5. 检查是否有 s3:PutObject 权限',
-                  '修复建议': '在存储桶策略中添加 s3:PutObject 权限，或确保IAM用户有足够权限',
-                  '详细文档': '查看 docs/BUCKET_POLICY_FIX.md',
+                  '问题': 'Bucket 策略可能只允许 oss:GetObject（读取），不允许 oss:PutObject（上传）',
+                  '检查方法': '1. 登录阿里云控制台\n2. 打开 OSS 服务\n3. 选择对应 Bucket\n4. 在「权限管理/策略管理」中确认已授予 oss:PutObject\n5. 确保 RAM 用户具备写入权限',
+                  '修复建议': '在 OSS Bucket 策略或 RAM 权限中添加 oss:PutObject，或为临时角色授予写入权限',
+                  '详细文档': '查看 docs/OSS_DETAILED_CONFIG_GUIDE.md',
                 },
               },
               '可能原因4: 预签名URL已过期': {
@@ -303,7 +303,7 @@ const AdminDashboard: React.FC = () => {
             };
             
             console.error('🔍 403 Forbidden 详细诊断:', diagnosis);
-            console.error('💡 重点检查: 存储桶策略是否包含 s3:PutObject 权限');
+            console.error('💡 重点检查: Bucket 策略是否包含 oss:PutObject 权限');
             console.error('📖 修复指南: 查看项目中的 docs/BUCKET_POLICY_FIX.md 文件');
             
             // 在控制台显示醒目的提示
@@ -316,7 +316,7 @@ const AdminDashboard: React.FC = () => {
               'color: orange; font-size: 14px;'
             );
             console.error(
-              '%c请检查 AWS S3 控制台中的存储桶策略，确保包含 s3:PutObject 权限。',
+              '%c请检查阿里云 OSS 控制台中的权限配置，确保包含 oss:PutObject（或相应写入权限）。',
               'color: orange; font-size: 14px;'
             );
           }
@@ -387,20 +387,20 @@ const AdminDashboard: React.FC = () => {
     })
   }
 
-  // 测试 AWS 配置
+  // 测试 OSS 配置
   const handleTestConfig = async () => {
     setConfigTestLoading(true)
     setConfigTestResult(null)
     setIsConfigTestModalVisible(true)
     
     try {
-      console.log('🔍 开始诊断 AWS 配置...')
+      console.log('🔍 开始诊断 OSS 配置...')
       const response = await uploadAPI.testConfig()
       setConfigTestResult(response.data)
-      console.log('✅ AWS 配置诊断结果:', response.data)
+      console.log('✅ OSS 配置诊断结果:', response.data)
       message.success('配置测试完成，请查看控制台获取详细信息')
     } catch (error: any) {
-      console.error('❌ AWS 配置诊断失败:', error)
+      console.error('❌ OSS 配置诊断失败:', error)
       setConfigTestResult({
         error: true,
         message: error.response?.data?.message || error.message || '测试失败',
@@ -625,7 +625,7 @@ const AdminDashboard: React.FC = () => {
                 block
                 onClick={handleTestConfig}
               >
-                测试 AWS 配置
+                测试 OSS 配置
               </Button>
               <Button
                 type="dashed"
@@ -861,9 +861,9 @@ const AdminDashboard: React.FC = () => {
         </Form>
       </Modal>
 
-      {/* AWS 配置测试模态框 */}
+      {/* OSS 配置测试模态框 */}
       <Modal
-        title="🔍 AWS S3 配置诊断"
+        title="🔍 OSS 配置诊断"
         open={isConfigTestModalVisible}
         onCancel={() => setIsConfigTestModalVisible(false)}
         footer={[
@@ -879,7 +879,7 @@ const AdminDashboard: React.FC = () => {
         {configTestLoading ? (
           <div style={{ textAlign: 'center', padding: '40px 0' }}>
             <Space direction="vertical" size="large">
-              <div>正在测试 AWS 配置...</div>
+              <div>正在测试 OSS 配置...</div>
             </Space>
           </div>
         ) : configTestResult ? (
@@ -904,15 +904,15 @@ const AdminDashboard: React.FC = () => {
                       ) : (
                         <Tag color="red">❌ 未配置</Tag>
                       )}
-                      {configTestResult.config?.accessKeyIdPrefix && (
+                      {configTestResult.config?.accessKeyIdPreview && (
                         <Text code style={{ marginLeft: 8 }}>
-                          {configTestResult.config.accessKeyIdPrefix}
+                          {configTestResult.config.accessKeyIdPreview}
                         </Text>
                       )}
                     </div>
                     <div>
                       <Text strong>密钥：</Text>{' '}
-                      {configTestResult.config?.hasSecretAccessKey ? (
+                      {configTestResult.config?.hasAccessKeySecret ? (
                         <Tag color="green">✅ 已配置</Tag>
                       ) : (
                         <Tag color="red">❌ 未配置</Tag>
@@ -927,8 +927,8 @@ const AdminDashboard: React.FC = () => {
                       <Text code>{configTestResult.config?.bucket || '未配置'}</Text>
                     </div>
                     <div>
-                      <Text strong>S3 客户端：</Text>{' '}
-                      {configTestResult.config?.s3Initialized ? (
+                      <Text strong>OSS 客户端：</Text>{' '}
+                      {configTestResult.config?.ossInitialized ? (
                         <Tag color="green">✅ 已初始化</Tag>
                       ) : (
                         <Tag color="red">❌ 未初始化</Tag>

@@ -1,43 +1,40 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as AWS from 'aws-sdk';
+import OSS from 'ali-oss';
 
 export interface DiagnosisResult {
   category: string;
   test: string;
   status: 'pass' | 'fail' | 'warning';
   message: string;
-  details?: any;
+  details?: Record<string, any>;
   recommendation?: string;
+}
+
+interface DiagnosisSummary {
+  total: number;
+  passed: number;
+  failed: number;
+  warnings: number;
 }
 
 @Injectable()
 export class UploadDeepDiagnosisService {
-  private s3: AWS.S3;
+  private readonly bucket: string | undefined;
+  private readonly region: string | undefined;
+  private readonly endpoint: string | undefined;
+  private client: OSS | null = null;
 
-  constructor(private configService: ConfigService) {
-    const accessKeyId = this.configService.get<string>('AWS_ACCESS_KEY_ID');
-    const secretAccessKey = this.configService.get<string>('AWS_SECRET_ACCESS_KEY');
-    const region = this.configService.get<string>('AWS_REGION');
+  constructor(private readonly configService: ConfigService) {
+    this.bucket = this.getConfigValue('OSS_BUCKET', 'AWS_S3_BUCKET');
+    this.region = this.getConfigValue('OSS_REGION', 'AWS_REGION');
+    this.endpoint = this.getConfigValue('OSS_ENDPOINT', 'AWS_S3_ENDPOINT');
 
-    if (accessKeyId && secretAccessKey && region) {
-      this.s3 = new AWS.S3({
-        accessKeyId,
-        secretAccessKey,
-        region,
-        signatureVersion: 'v4',
-        s3ForcePathStyle: false,
-      });
-    }
+    this.initializeClient();
   }
 
   async performDeepDiagnosis(): Promise<{
-    summary: {
-      total: number;
-      passed: number;
-      failed: number;
-      warnings: number;
-    };
+    summary: DiagnosisSummary;
     results: DiagnosisResult[];
     criticalIssues: string[];
     recommendations: string[];
@@ -46,56 +43,113 @@ export class UploadDeepDiagnosisService {
     const criticalIssues: string[] = [];
     const recommendations: string[] = [];
 
-    // 1. 环境变量深度检查
     await this.checkEnvironmentVariables(results, criticalIssues, recommendations);
-
-    // 2. AWS SDK 配置检查
-    await this.checkSDKConfiguration(results, criticalIssues, recommendations);
-
-    // 3. 预签名URL签名算法检查
-    await this.checkPresignedUrlSignature(results, criticalIssues, recommendations);
-
-    // 4. 请求头匹配检查
-    await this.checkHeaderMatching(results, criticalIssues, recommendations);
-
-    // 5. 时间同步检查
-    await this.checkTimeSync(results, criticalIssues, recommendations);
-
-    // 6. 存储桶策略深度检查
-    await this.checkBucketPolicy(results, criticalIssues, recommendations);
-
-    // 7. CORS配置检查
-    await this.checkCORSConfiguration(results, criticalIssues, recommendations);
-
-    // 8. 区域配置检查
-    await this.checkRegionConfiguration(results, criticalIssues, recommendations);
-
-    // 9. URL编码问题检查
-    await this.checkURLEncoding(results, criticalIssues, recommendations);
-
-    // 10. 实际文件上传测试
+    await this.checkClientInitialization(results, criticalIssues, recommendations);
+    await this.checkBucketAccessibility(results, criticalIssues, recommendations);
+    await this.checkSignatureUrl(results, criticalIssues, recommendations);
+    await this.checkBucketAcl(results, criticalIssues, recommendations);
+    await this.checkCorsConfiguration(results, criticalIssues, recommendations);
+    await this.checkRegionConsistency(results, criticalIssues, recommendations);
     await this.testActualUpload(results, criticalIssues, recommendations);
-
-    // 11. 网络连接检查
     await this.checkNetworkConnectivity(results, criticalIssues, recommendations);
 
-    // 12. 签名版本检查
-    await this.checkSignatureVersion(results, criticalIssues, recommendations);
-
-    // 统计
-    const summary = {
+    const summary: DiagnosisSummary = {
       total: results.length,
-      passed: results.filter(r => r.status === 'pass').length,
-      failed: results.filter(r => r.status === 'fail').length,
-      warnings: results.filter(r => r.status === 'warning').length,
+      passed: results.filter((r) => r.status === 'pass').length,
+      failed: results.filter((r) => r.status === 'fail').length,
+      warnings: results.filter((r) => r.status === 'warning').length,
     };
 
     return {
       summary,
       results,
       criticalIssues,
-      recommendations: [...new Set(recommendations)], // 去重
+      recommendations: [...new Set(recommendations)],
     };
+  }
+
+  async checkPolicyEffectiveness(): Promise<{
+    success: boolean;
+    bucket?: string;
+    acl?: string;
+    owner?: Record<string, any>;
+    hasWritePermission: boolean;
+    message: string;
+    recommendations?: string[];
+  }> {
+    if (!this.client || !this.bucket) {
+      return {
+        success: false,
+        hasWritePermission: false,
+        message: 'OSS 客户端未初始化或 Bucket 未配置',
+        recommendations: ['检查 AccessKey、Region、Bucket 是否已配置'],
+      };
+    }
+
+    try {
+      const aclInfo = await this.client.getBucketACL(this.bucket);
+      const acl = aclInfo?.acl || 'unknown';
+      const recommendations: string[] = [];
+
+      if (acl === 'public-read-write') {
+        recommendations.push('⚠️ Bucket 处于 public-read-write，建议改为 private 以确保安全。');
+      }
+
+      // 对于主账号或 RAM 用户，只要能够调用 getBucketACL，一般已经具备写权限。
+      // 为了更准确，尝试一次无副作用的写操作（写入/删除临时对象）。
+      let hasWritePermission = false;
+      try {
+        const key = `diagnosis/policy-check-${Date.now()}.txt`;
+        await this.client.put(key, Buffer.from('policy-check'));
+        await this.client.delete(key);
+        hasWritePermission = true;
+      } catch (error) {
+        hasWritePermission = false;
+        recommendations.push('❌ 当前 AccessKey 无法写入 Bucket，检查 RAM 策略或 STS 权限。');
+      }
+
+      return {
+        success: true,
+        bucket: this.bucket,
+        acl,
+        owner: aclInfo?.owner,
+        hasWritePermission,
+        message: hasWritePermission
+          ? '✅ Bucket ACL 生效且当前凭证具备写权限'
+          : '⚠️ Bucket ACL 获取成功，但写权限验证失败',
+        recommendations: recommendations.length ? recommendations : undefined,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        hasWritePermission: false,
+        message: `无法获取 Bucket ACL：${error?.message || error}`,
+        recommendations: ['确认 AccessKey 是否拥有 GetBucketACL 权限', '检查网络可达性'],
+      };
+    }
+  }
+
+  private initializeClient() {
+    const accessKeyId = this.getConfigValue('OSS_ACCESS_KEY_ID', 'AWS_ACCESS_KEY_ID');
+    const accessKeySecret = this.getConfigValue('OSS_ACCESS_KEY_SECRET', 'AWS_SECRET_ACCESS_KEY');
+
+    if (!accessKeyId || !accessKeySecret || !this.region || !this.bucket) {
+      return;
+    }
+
+    const options: OSS.Options = {
+      region: this.region,
+      bucket: this.bucket,
+      accessKeyId,
+      accessKeySecret,
+      secure: true,
+    };
+
+    if (this.endpoint) {
+      options.endpoint = this.endpoint;
+    }
+
+    this.client = new OSS(options);
   }
 
   private async checkEnvironmentVariables(
@@ -103,857 +157,285 @@ export class UploadDeepDiagnosisService {
     criticalIssues: string[],
     recommendations: string[],
   ) {
-    const accessKeyId = this.configService.get<string>('AWS_ACCESS_KEY_ID');
-    const secretAccessKey = this.configService.get<string>('AWS_SECRET_ACCESS_KEY');
-    const region = this.configService.get<string>('AWS_REGION');
-    const bucket = this.configService.get<string>('AWS_S3_BUCKET');
+    const accessKeyId = this.getConfigValue('OSS_ACCESS_KEY_ID', 'AWS_ACCESS_KEY_ID');
+    const accessKeySecret = this.getConfigValue('OSS_ACCESS_KEY_SECRET', 'AWS_SECRET_ACCESS_KEY');
+    const region = this.region;
+    const bucket = this.bucket;
 
-    // 检查是否存在
-    if (!accessKeyId || !secretAccessKey || !region || !bucket) {
+    const missing: string[] = [];
+    if (!accessKeyId) missing.push('OSS_ACCESS_KEY_ID（或 AWS_ACCESS_KEY_ID）');
+    if (!accessKeySecret) missing.push('OSS_ACCESS_KEY_SECRET（或 AWS_SECRET_ACCESS_KEY）');
+    if (!region) missing.push('OSS_REGION（或 AWS_REGION）');
+    if (!bucket) missing.push('OSS_BUCKET（或 AWS_S3_BUCKET）');
+
+    if (missing.length) {
       results.push({
         category: '环境变量',
-        test: '环境变量完整性',
+        test: '必填项',
         status: 'fail',
-        message: '缺少必要的环境变量',
-        details: {
-          hasAccessKeyId: !!accessKeyId,
-          hasSecretAccessKey: !!secretAccessKey,
-          hasRegion: !!region,
-          hasBucket: !!bucket,
-        },
+        message: `缺少必要配置：${missing.join(', ')}`,
       });
-      criticalIssues.push('环境变量配置不完整');
+      criticalIssues.push('OSS 环境变量不完整');
+      recommendations.push('完善 .env 中的 AccessKey / Region / Bucket 配置。');
       return;
-    }
-
-    // 检查格式
-    const accessKeyIdPattern = /^AKIA[0-9A-Z]{16}$/;
-    const regionPattern = /^[a-z0-9-]+$/;
-    const bucketPattern = /^[a-z0-9.-]+$/;
-
-    if (!accessKeyIdPattern.test(accessKeyId)) {
-      results.push({
-        category: '环境变量',
-        test: 'Access Key ID 格式',
-        status: 'fail',
-        message: `Access Key ID 格式不正确: ${accessKeyId.substring(0, 8)}...`,
-        details: {
-          expectedFormat: 'AKIA + 16位大写字母和数字',
-          actual: accessKeyId.substring(0, 12) + '...',
-        },
-      });
-      criticalIssues.push('Access Key ID 格式错误');
-    }
-
-    if (secretAccessKey.length < 40) {
-      results.push({
-        category: '环境变量',
-        test: 'Secret Access Key 长度',
-        status: 'warning',
-        message: `Secret Access Key 长度异常: ${secretAccessKey.length} 字符`,
-        details: {
-          expectedLength: '40+ 字符',
-          actualLength: secretAccessKey.length,
-        },
-      });
-    }
-
-    if (!regionPattern.test(region)) {
-      results.push({
-        category: '环境变量',
-        test: 'Region 格式',
-        status: 'fail',
-        message: `Region 格式不正确: ${region}`,
-        details: {
-          expectedFormat: '小写字母、数字和连字符',
-          actual: region,
-        },
-      });
-      criticalIssues.push('Region 格式错误');
-    }
-
-    if (!bucketPattern.test(bucket)) {
-      results.push({
-        category: '环境变量',
-        test: 'Bucket 名称格式',
-        status: 'warning',
-        message: `Bucket 名称可能包含无效字符: ${bucket}`,
-        details: {
-          expectedFormat: '小写字母、数字、点和连字符',
-          actual: bucket,
-        },
-      });
     }
 
     results.push({
       category: '环境变量',
-      test: '环境变量基础检查',
+      test: '基础检查',
       status: 'pass',
-      message: '所有必要的环境变量都已配置',
+      message: '所有必要的环境变量均已设置',
+      details: {
+        region,
+        bucket,
+        endpoint: this.endpoint || 'auto',
+        accessKeyIdPreview: `${accessKeyId.substring(0, 6)}***`,
+      },
     });
   }
 
-  private async checkSDKConfiguration(
+  private async checkClientInitialization(
     results: DiagnosisResult[],
     criticalIssues: string[],
     recommendations: string[],
   ) {
-    if (!this.s3) {
+    if (!this.client) {
       results.push({
-        category: 'SDK配置',
-        test: 'S3 客户端初始化',
+        category: 'OSS 客户端',
+        test: '初始化',
         status: 'fail',
-        message: 'S3 客户端未初始化',
+        message: 'OSS 客户端未初始化，无法生成预签名 URL',
       });
-      criticalIssues.push('S3 客户端未初始化');
+      criticalIssues.push('OSS 客户端初始化失败');
+      recommendations.push('确认 AccessKey / Region / Bucket 配置正确。');
       return;
-    }
-
-    const config = this.s3.config;
-    const region = config.region;
-    const signatureVersion = config.signatureVersion;
-
-    if (signatureVersion !== 'v4') {
-      results.push({
-        category: 'SDK配置',
-        test: '签名版本',
-        status: 'fail',
-        message: `签名版本不正确: ${signatureVersion}，应该是 v4`,
-        details: {
-          current: signatureVersion,
-          expected: 'v4',
-        },
-      });
-      criticalIssues.push('签名版本不是 v4');
-      recommendations.push('确保 AWS SDK 配置中使用 signatureVersion: "v4"');
-    } else {
-      results.push({
-        category: 'SDK配置',
-        test: '签名版本',
-        status: 'pass',
-        message: '签名版本正确 (v4)',
-      });
-    }
-
-    if (config.s3ForcePathStyle) {
-      results.push({
-        category: 'SDK配置',
-        test: '路径样式',
-        status: 'warning',
-        message: '使用了路径样式 (s3ForcePathStyle: true)，可能影响 URL 格式',
-        details: {
-          s3ForcePathStyle: config.s3ForcePathStyle,
-        },
-      });
-      recommendations.push('如果使用虚拟主机样式，设置 s3ForcePathStyle: false');
     }
 
     results.push({
-      category: 'SDK配置',
-      test: 'SDK 配置检查',
+      category: 'OSS 客户端',
+      test: '初始化',
       status: 'pass',
-      message: `SDK 配置正常，区域: ${region}`,
+      message: 'OSS 客户端初始化成功',
     });
   }
 
-  private async checkPresignedUrlSignature(
+  private async checkBucketAccessibility(
     results: DiagnosisResult[],
     criticalIssues: string[],
     recommendations: string[],
   ) {
-    if (!this.s3) {
+    if (!this.client || !this.bucket) {
       return;
     }
 
     try {
-      const bucket = this.configService.get<string>('AWS_S3_BUCKET');
-      const testKey = 'diagnosis/test-presigned-url.txt';
-      const testContentType = 'text/plain';
-
-      const presignedUrl = await this.s3.getSignedUrlPromise('putObject', {
-        Bucket: bucket,
-        Key: testKey,
-        ContentType: testContentType,
-        Expires: 300,
-      } as any);
-
-      // 解析URL
-      const url = new URL(presignedUrl);
-      const params = url.searchParams;
-
-      // 检查必需的签名参数
-      const requiredParams = [
-        'X-Amz-Algorithm',
-        'X-Amz-Credential',
-        'X-Amz-Date',
-        'X-Amz-Expires',
-        'X-Amz-SignedHeaders',
-        'X-Amz-Signature',
-      ];
-
-      const missingParams: string[] = [];
-      for (const param of requiredParams) {
-        if (!params.has(param)) {
-          missingParams.push(param);
-        }
-      }
-
-      if (missingParams.length > 0) {
-        results.push({
-          category: '预签名URL',
-          test: '签名参数完整性',
-          status: 'fail',
-          message: `缺少必需的签名参数: ${missingParams.join(', ')}`,
-          details: {
-            missingParams,
-            allParams: Array.from(params.keys()),
-          },
-        });
-        criticalIssues.push('预签名URL缺少必需的签名参数');
-      } else {
-        results.push({
-          category: '预签名URL',
-          test: '签名参数完整性',
-          status: 'pass',
-          message: '所有必需的签名参数都存在',
-        });
-      }
-
-      // 检查 Content-Type 是否在签名中
-      const signedHeaders = params.get('X-Amz-SignedHeaders') || '';
-      if (!signedHeaders.includes('content-type')) {
-        results.push({
-          category: '预签名URL',
-          test: 'Content-Type 签名',
-          status: 'warning',
-          message: 'Content-Type 未包含在签名头中，可能导致上传时签名验证失败',
-          details: {
-            signedHeaders,
-            contentType: testContentType,
-          },
-        });
-        recommendations.push('确保 Content-Type 包含在 X-Amz-SignedHeaders 中');
-      } else {
-        results.push({
-          category: '预签名URL',
-          test: 'Content-Type 签名',
-          status: 'pass',
-          message: 'Content-Type 已包含在签名头中',
-        });
-      }
-
-      // 检查 URL 中的 Content-Type 参数
-      const urlContentType = params.get('Content-Type');
-      if (urlContentType !== testContentType) {
-        results.push({
-          category: '预签名URL',
-          test: 'URL中的Content-Type',
-          status: 'fail',
-          message: `URL中的Content-Type与请求的不匹配: ${urlContentType} vs ${testContentType}`,
-          details: {
-            urlContentType,
-            requestedContentType: testContentType,
-          },
-        });
-        criticalIssues.push('预签名URL中的Content-Type不匹配');
-      } else {
-        results.push({
-          category: '预签名URL',
-          test: 'URL中的Content-Type',
-          status: 'pass',
-          message: 'URL中的Content-Type正确',
-        });
-      }
-
-      // 检查签名算法
-      const algorithm = params.get('X-Amz-Algorithm');
-      if (algorithm !== 'AWS4-HMAC-SHA256') {
-        results.push({
-          category: '预签名URL',
-          test: '签名算法',
-          status: 'fail',
-          message: `签名算法不正确: ${algorithm}`,
-          details: {
-            current: algorithm,
-            expected: 'AWS4-HMAC-SHA256',
-          },
-        });
-        criticalIssues.push('签名算法不正确');
-      } else {
-        results.push({
-          category: '预签名URL',
-          test: '签名算法',
-          status: 'pass',
-          message: '签名算法正确 (AWS4-HMAC-SHA256)',
-        });
-      }
-
-      // 检查过期时间
-      const expires = parseInt(params.get('X-Amz-Expires') || '0', 10);
-      if (expires !== 300) {
-        results.push({
-          category: '预签名URL',
-          test: '过期时间',
-          status: 'warning',
-          message: `过期时间不匹配: ${expires} 秒，期望 300 秒`,
-          details: {
-            actual: expires,
-            expected: 300,
-          },
-        });
-      }
-
+      const info = await this.client.getBucketInfo(this.bucket);
       results.push({
-        category: '预签名URL',
-        test: '预签名URL生成',
+        category: 'Bucket',
+        test: '可访问性',
         status: 'pass',
-        message: '预签名URL生成成功',
+        message: '可以访问指定 Bucket',
         details: {
-          urlLength: presignedUrl.length,
-          host: url.hostname,
+          bucket: this.bucket,
+          creationDate: info?.bucket?.CreationDate,
+          location: info?.bucket?.Location,
         },
       });
     } catch (error: any) {
       results.push({
-        category: '预签名URL',
-        test: '预签名URL生成',
+        category: 'Bucket',
+        test: '可访问性',
         status: 'fail',
-        message: `生成预签名URL失败: ${error.message}`,
-        details: {
-          error: error.code || error.name,
-          message: error.message,
-        },
+        message: `无法访问 Bucket：${error?.message || error}`,
       });
-      criticalIssues.push('无法生成预签名URL');
+      criticalIssues.push('无法访问 Bucket');
+      recommendations.push('检查 Bucket 名称、Region 与 AccessKey 权限。');
     }
   }
 
-  private async checkHeaderMatching(
+  private async checkSignatureUrl(
     results: DiagnosisResult[],
     criticalIssues: string[],
     recommendations: string[],
   ) {
-    if (!this.s3) {
+    if (!this.client || !this.bucket) {
       return;
     }
 
     try {
-      const bucket = this.configService.get<string>('AWS_S3_BUCKET');
-      const testKey = 'diagnosis/test-headers.txt';
-      const testContentType = 'image/jpeg';
+      const key = `diagnosis/test-presigned-${Date.now()}.txt`;
+      const contentType = 'text/plain';
 
-      const presignedUrl = await this.s3.getSignedUrlPromise('putObject', {
-        Bucket: bucket,
-        Key: testKey,
-        ContentType: testContentType,
-        Expires: 300,
-      } as any);
-
-      const url = new URL(presignedUrl);
-      const params = url.searchParams;
-      const signedHeaders = params.get('X-Amz-SignedHeaders') || '';
-
-      // 分析签名头
-      const signedHeadersList = signedHeaders.split(';');
-      const hasContentType = signedHeadersList.includes('content-type');
-
-      results.push({
-        category: '请求头匹配',
-        test: '签名头分析',
-        status: hasContentType ? 'pass' : 'warning',
-        message: `签名头: ${signedHeaders}`,
-        details: {
-          signedHeadersList,
-          hasContentType,
-          contentTypeInUrl: params.get('Content-Type'),
-        },
+      const url = this.client.signatureUrl(key, {
+        method: 'PUT',
+        expires: 300,
+        headers: { 'Content-Type': contentType },
       });
 
-      if (!hasContentType) {
-        recommendations.push(
-          '前端上传时必须使用与预签名URL中完全相同的Content-Type，且不能添加其他请求头',
-        );
-      }
+      const parsed = new URL(url);
+      const expires = parsed.searchParams.get('Expires');
+      const signature = parsed.searchParams.get('Signature');
 
-      // 检查大小写敏感性
-      const contentTypeInUrl = params.get('Content-Type');
-      if (contentTypeInUrl && contentTypeInUrl !== testContentType) {
+      if (!expires || !signature) {
         results.push({
-          category: '请求头匹配',
-          test: 'Content-Type 匹配',
+          category: '预签名 URL',
+          test: '参数完整性',
           status: 'fail',
-          message: `Content-Type 不匹配: ${contentTypeInUrl} vs ${testContentType}`,
-          details: {
-            urlContentType: contentTypeInUrl,
-            requestedContentType: testContentType,
-          },
+          message: '预签名 URL 缺少 Expires 或 Signature 参数',
         });
-        criticalIssues.push('Content-Type 不匹配');
-      }
-    } catch (error: any) {
-      results.push({
-        category: '请求头匹配',
-        test: '请求头检查',
-        status: 'fail',
-        message: `检查请求头失败: ${error.message}`,
-      });
-    }
-  }
-
-  private async checkTimeSync(
-    results: DiagnosisResult[],
-    criticalIssues: string[],
-    recommendations: string[],
-  ) {
-    try {
-      // 获取服务器时间
-      const serverTime = new Date();
-      const serverTimeMs = serverTime.getTime();
-
-      // 尝试从AWS获取时间（通过检查预签名URL中的日期）
-      if (this.s3) {
-        const bucket = this.configService.get<string>('AWS_S3_BUCKET');
-        const testUrl = await this.s3.getSignedUrlPromise('putObject', {
-          Bucket: bucket,
-          Key: 'test',
-          Expires: 300,
-        } as any);
-
-        const url = new URL(testUrl);
-        const amzDate = url.searchParams.get('X-Amz-Date');
-        if (amzDate) {
-          // 解析AWS日期 (格式: YYYYMMDDTHHmmssZ)
-          const awsYear = parseInt(amzDate.substring(0, 4), 10);
-          const awsMonth = parseInt(amzDate.substring(4, 6), 10) - 1;
-          const awsDay = parseInt(amzDate.substring(6, 8), 10);
-          const awsHour = parseInt(amzDate.substring(9, 11), 10);
-          const awsMinute = parseInt(amzDate.substring(11, 13), 10);
-          const awsSecond = parseInt(amzDate.substring(13, 15), 10);
-
-          const awsTime = new Date(
-            Date.UTC(awsYear, awsMonth, awsDay, awsHour, awsMinute, awsSecond),
-          );
-          const timeDiff = Math.abs(serverTime.getTime() - awsTime.getTime());
-
-          if (timeDiff > 5 * 60 * 1000) {
-            // 5分钟
-            results.push({
-              category: '时间同步',
-              test: '服务器时间同步',
-              status: 'fail',
-              message: `服务器时间与AWS时间差异过大: ${Math.round(timeDiff / 1000 / 60)} 分钟`,
-              details: {
-                serverTime: serverTime.toISOString(),
-                awsTime: awsTime.toISOString(),
-                differenceMinutes: Math.round(timeDiff / 1000 / 60),
-              },
-            });
-            criticalIssues.push('服务器时间不同步');
-            recommendations.push('确保服务器时间与AWS时间同步（差异应在5分钟内）');
-          } else {
-            results.push({
-              category: '时间同步',
-              test: '服务器时间同步',
-              status: 'pass',
-              message: `时间同步正常，差异: ${Math.round(timeDiff / 1000)} 秒`,
-            });
-          }
-        }
-      }
-    } catch (error: any) {
-      results.push({
-        category: '时间同步',
-        test: '时间同步检查',
-        status: 'warning',
-        message: `无法检查时间同步: ${error.message}`,
-      });
-    }
-  }
-
-  private async checkBucketPolicy(
-    results: DiagnosisResult[],
-    criticalIssues: string[],
-    recommendations: string[],
-  ) {
-    if (!this.s3) {
-      return;
-    }
-
-    try {
-      const bucket = this.configService.get<string>('AWS_S3_BUCKET');
-
-      // 尝试获取存储桶策略
-      try {
-        const policy = await this.s3.getBucketPolicy({ Bucket: bucket }).promise();
-        const policyDoc = JSON.parse(policy.Policy || '{}');
-
-        results.push({
-          category: '存储桶策略',
-          test: '存储桶策略存在',
-          status: 'pass',
-          message: '存储桶策略已配置',
-          details: {
-            policyStatements: policyDoc.Statement?.length || 0,
-          },
-        });
-
-        // 详细分析策略中的 Actions
-        const statements = policyDoc.Statement || [];
-        const allActions: string[] = [];
-        const allPrincipals: string[] = [];
-        
-        statements.forEach((stmt: any) => {
-          if (stmt.Effect === 'Allow') {
-            // 收集所有 Actions
-            if (Array.isArray(stmt.Action)) {
-              allActions.push(...stmt.Action);
-            } else if (stmt.Action) {
-              allActions.push(stmt.Action);
-            }
-            
-            // 收集所有 Principals
-            if (stmt.Principal) {
-              if (typeof stmt.Principal === 'string') {
-                allPrincipals.push(stmt.Principal);
-              } else if (stmt.Principal['*']) {
-                allPrincipals.push('*');
-              } else if (typeof stmt.Principal === 'object') {
-                Object.keys(stmt.Principal).forEach(key => allPrincipals.push(key));
-              }
-            }
-          }
-        });
-
-        // 检查是否有 PutObject 权限
-        const hasPutObject = allActions.some(
-          (action) =>
-            action === 's3:PutObject' ||
-            action === 's3:PutObject*' ||
-            action === 's3:*' ||
-            (typeof action === 'string' && action.includes('PutObject')),
-        );
-
-        // 检查是否有 GetObject 权限
-        const hasGetObject = allActions.some(
-          (action) =>
-            action === 's3:GetObject' ||
-            action === 's3:GetObject*' ||
-            action === 's3:*' ||
-            (typeof action === 'string' && action.includes('GetObject')),
-        );
-
-        // 详细报告策略内容
-        results.push({
-          category: '存储桶策略',
-          test: '策略 Actions 分析',
-          status: 'pass',
-          message: `策略包含 ${allActions.length} 个操作`,
-          details: {
-            actions: allActions,
-            principals: allPrincipals,
-            hasGetObject,
-            hasPutObject,
-          },
-        });
-
-        if (!hasPutObject) {
-          results.push({
-            category: '存储桶策略',
-            test: 'PutObject 权限',
-            status: 'fail',
-            message: '❌ 存储桶策略中没有 s3:PutObject 权限！当前策略只允许读取（GetObject），不允许上传',
-            details: {
-              currentActions: allActions,
-              missingAction: 's3:PutObject',
-              recommendation: '需要在存储桶策略中添加 s3:PutObject 权限，或者确保IAM用户有足够的权限',
-            },
-          });
-          criticalIssues.push('存储桶策略缺少 s3:PutObject 权限');
-          recommendations.push(
-            '在存储桶策略中添加 s3:PutObject 权限。示例：在 Statement 中添加 {"Effect": "Allow", "Principal": {"AWS": "arn:aws:iam::YOUR_ACCOUNT:user/YOUR_USER"}, "Action": "s3:PutObject", "Resource": "arn:aws:s3:::YOUR_BUCKET/*"}',
-          );
-        } else {
-          results.push({
-            category: '存储桶策略',
-            test: 'PutObject 权限',
-            status: 'pass',
-            message: '✅ 存储桶策略包含 s3:PutObject 权限',
-          });
-        }
-
-        // 如果只有 GetObject，给出明确警告
-        if (hasGetObject && !hasPutObject) {
-          results.push({
-            category: '存储桶策略',
-            test: '策略权限分析',
-            status: 'fail',
-            message: '⚠️ 存储桶策略配置问题：只有读取权限，没有上传权限',
-            details: {
-              problem: '策略只允许 s3:GetObject（下载），不允许 s3:PutObject（上传）',
-              impact: '这可能导致预签名URL上传失败，即使IAM用户有权限',
-              solution: '需要修改存储桶策略，添加 s3:PutObject 权限',
-            },
-          });
-        }
-      } catch (error: any) {
-        if (error.code === 'NoSuchBucketPolicy') {
-          results.push({
-            category: '存储桶策略',
-            test: '存储桶策略',
-            status: 'warning',
-            message: '存储桶策略未配置（可能依赖IAM策略）',
-          });
-        } else {
-          results.push({
-            category: '存储桶策略',
-            test: '存储桶策略检查',
-            status: 'warning',
-            message: `无法检查存储桶策略: ${error.code || error.message}`,
-          });
-        }
-      }
-
-      // 检查存储桶是否存在
-      try {
-        await this.s3.headBucket({ Bucket: bucket }).promise();
-        results.push({
-          category: '存储桶策略',
-          test: '存储桶访问',
-          status: 'pass',
-          message: '可以访问存储桶',
-        });
-      } catch (error: any) {
-        results.push({
-          category: '存储桶策略',
-          test: '存储桶访问',
-          status: 'fail',
-          message: `无法访问存储桶: ${error.code || error.message}`,
-          details: {
-            errorCode: error.code,
-            errorMessage: error.message,
-          },
-        });
-        criticalIssues.push('无法访问存储桶');
-      }
-    } catch (error: any) {
-      results.push({
-        category: '存储桶策略',
-        test: '存储桶策略检查',
-        status: 'fail',
-        message: `检查存储桶策略失败: ${error.message}`,
-      });
-    }
-  }
-
-  private async checkCORSConfiguration(
-    results: DiagnosisResult[],
-    criticalIssues: string[],
-    recommendations: string[],
-  ) {
-    if (!this.s3) {
-      return;
-    }
-
-    try {
-      const bucket = this.configService.get<string>('AWS_S3_BUCKET');
-
-      try {
-        const cors = await this.s3.getBucketCors({ Bucket: bucket }).promise();
-        const corsRules = cors.CORSRules || [];
-
-        if (corsRules.length === 0) {
-          results.push({
-            category: 'CORS配置',
-            test: 'CORS规则',
-            status: 'warning',
-            message: '存储桶未配置CORS规则',
-          });
-          recommendations.push('如果前端直接上传到S3，需要配置CORS规则');
-        } else {
-          // 检查是否允许PUT方法
-          const hasPutMethod = corsRules.some((rule: any) =>
-            rule.AllowedMethods?.includes('PUT'),
-          );
-
-          if (!hasPutMethod) {
-            results.push({
-              category: 'CORS配置',
-              test: 'PUT方法',
-              status: 'warning',
-              message: 'CORS规则中可能没有允许PUT方法',
-              details: {
-                corsRules: corsRules.length,
-              },
-            });
-            recommendations.push('确保CORS规则允许PUT方法');
-          } else {
-            results.push({
-              category: 'CORS配置',
-              test: 'PUT方法',
-              status: 'pass',
-              message: 'CORS规则允许PUT方法',
-            });
-          }
-
-          // 检查允许的来源
-          const allowedOrigins = corsRules.flatMap((rule: any) => rule.AllowedOrigins || []);
-          if (allowedOrigins.length === 0) {
-            results.push({
-              category: 'CORS配置',
-              test: '允许的来源',
-              status: 'warning',
-              message: 'CORS规则中未配置允许的来源',
-            });
-          }
-
-          results.push({
-            category: 'CORS配置',
-            test: 'CORS规则',
-            status: 'pass',
-            message: `CORS规则已配置，规则数: ${corsRules.length}`,
-            details: {
-              rules: corsRules.length,
-              allowedOrigins,
-            },
-          });
-        }
-      } catch (error: any) {
-        if (error.code === 'NoSuchCORSConfiguration') {
-          results.push({
-            category: 'CORS配置',
-            test: 'CORS配置',
-            status: 'warning',
-            message: '存储桶未配置CORS（如果使用预签名URL，可能不需要）',
-          });
-        } else {
-          results.push({
-            category: 'CORS配置',
-            test: 'CORS配置检查',
-            status: 'warning',
-            message: `无法检查CORS配置: ${error.code || error.message}`,
-          });
-        }
-      }
-    } catch (error: any) {
-      results.push({
-        category: 'CORS配置',
-        test: 'CORS配置检查',
-        status: 'warning',
-        message: `检查CORS配置失败: ${error.message}`,
-      });
-    }
-  }
-
-  private async checkRegionConfiguration(
-    results: DiagnosisResult[],
-    criticalIssues: string[],
-    recommendations: string[],
-  ) {
-    if (!this.s3) {
-      return;
-    }
-
-    try {
-      const bucket = this.configService.get<string>('AWS_S3_BUCKET');
-      const configuredRegion = this.configService.get<string>('AWS_REGION');
-
-      // 获取存储桶的实际区域
-      try {
-        const location = await this.s3.getBucketLocation({ Bucket: bucket }).promise();
-        const actualRegion = location.LocationConstraint || 'us-east-1'; // us-east-1 返回 null
-
-        if (actualRegion !== configuredRegion) {
-          results.push({
-            category: '区域配置',
-            test: '区域匹配',
-            status: 'fail',
-            message: `区域不匹配: 配置的 ${configuredRegion} vs 实际的 ${actualRegion}`,
-            details: {
-              configured: configuredRegion,
-              actual: actualRegion,
-            },
-          });
-          criticalIssues.push('存储桶区域与配置不匹配');
-          recommendations.push(`将 AWS_REGION 环境变量更新为 ${actualRegion}`);
-        } else {
-          results.push({
-            category: '区域配置',
-            test: '区域匹配',
-            status: 'pass',
-            message: `区域匹配: ${actualRegion}`,
-          });
-        }
-      } catch (error: any) {
-        results.push({
-          category: '区域配置',
-          test: '区域检查',
-          status: 'warning',
-          message: `无法获取存储桶区域: ${error.code || error.message}`,
-        });
-      }
-    } catch (error: any) {
-      results.push({
-        category: '区域配置',
-        test: '区域配置检查',
-        status: 'fail',
-        message: `检查区域配置失败: ${error.message}`,
-      });
-    }
-  }
-
-  private async checkURLEncoding(
-    results: DiagnosisResult[],
-    criticalIssues: string[],
-    recommendations: string[],
-  ) {
-    if (!this.s3) {
-      return;
-    }
-
-    try {
-      const bucket = this.configService.get<string>('AWS_S3_BUCKET');
-      // 测试特殊字符的文件名
-      const testKey = 'diagnosis/test file with spaces & special chars.txt';
-      const testContentType = 'text/plain';
-
-      const presignedUrl = await this.s3.getSignedUrlPromise('putObject', {
-        Bucket: bucket,
-        Key: testKey,
-        ContentType: testContentType,
-        Expires: 300,
-      } as any);
-
-      const url = new URL(presignedUrl);
-      const keyInUrl = url.pathname.substring(1); // 移除前导斜杠
-
-      // 检查URL编码
-      if (keyInUrl !== encodeURIComponent(testKey).replace(/%2F/g, '/')) {
-        results.push({
-          category: 'URL编码',
-          test: '文件名编码',
-          status: 'warning',
-          message: '文件名在URL中的编码可能不正确',
-          details: {
-            original: testKey,
-            inUrl: keyInUrl,
-            expected: encodeURIComponent(testKey).replace(/%2F/g, '/'),
-          },
-        });
-        recommendations.push('确保文件名在URL中正确编码');
+        criticalIssues.push('预签名 URL 参数缺失');
       } else {
         results.push({
-          category: 'URL编码',
-          test: '文件名编码',
+          category: '预签名 URL',
+          test: '生成',
           status: 'pass',
-          message: '文件名编码正确',
+          message: '预签名 URL 生成成功',
+          details: {
+            host: parsed.host,
+            expires,
+            signedHeaders: parsed.searchParams.get('OSSAccessKeyId')
+              ? ['OSSAccessKeyId', 'Signature', 'Expires']
+              : ['Signature', 'Expires'],
+          },
         });
       }
     } catch (error: any) {
       results.push({
-        category: 'URL编码',
-        test: 'URL编码检查',
+        category: '预签名 URL',
+        test: '生成',
+        status: 'fail',
+        message: `生成预签名 URL 失败：${error?.message || error}`,
+      });
+      criticalIssues.push('预签名 URL 生成失败');
+    }
+  }
+
+  private async checkBucketAcl(
+    results: DiagnosisResult[],
+    criticalIssues: string[],
+    recommendations: string[],
+  ) {
+    if (!this.client || !this.bucket) {
+      return;
+    }
+
+    try {
+      const aclInfo = await this.client.getBucketACL(this.bucket);
+      const acl = aclInfo?.acl || 'unknown';
+
+      results.push({
+        category: 'Bucket ACL',
+        test: '权限',
+        status: 'pass',
+        message: `Bucket ACL: ${acl}`,
+        details: {
+          owner: aclInfo?.owner?.ID,
+          displayName: aclInfo?.owner?.DisplayName,
+        },
+      });
+
+      if (acl === 'public-read-write') {
+        recommendations.push('当前 Bucket 为 public-read-write，建议设置为 private，防止误删。');
+      }
+    } catch (error: any) {
+      results.push({
+        category: 'Bucket ACL',
+        test: '权限',
         status: 'warning',
-        message: `检查URL编码失败: ${error.message}`,
+        message: `无法获取 Bucket ACL：${error?.message || error}`,
+      });
+    }
+  }
+
+  private async checkCorsConfiguration(
+    results: DiagnosisResult[],
+    criticalIssues: string[],
+    recommendations: string[],
+  ) {
+    if (!this.client || !this.bucket) {
+      return;
+    }
+
+    try {
+      const cors = await this.client.getBucketCORS(this.bucket);
+      const rules = cors?.CORSRules || cors?.corsRules || [];
+
+      if (!rules.length) {
+        results.push({
+          category: 'CORS',
+          test: '规则',
+          status: 'warning',
+          message: 'Bucket 未配置 CORS，前端直传可能 403',
+        });
+        recommendations.push('在 OSS 控制台为该 Bucket 添加允许 PUT 的 CORS 规则。');
+      } else {
+        const allowsPut = rules.some((rule: any) =>
+          (rule.AllowedMethod || rule.AllowedMethods)?.includes('PUT'),
+        );
+
+        results.push({
+          category: 'CORS',
+          test: '规则',
+          status: allowsPut ? 'pass' : 'warning',
+          message: allowsPut
+            ? 'CORS 规则已允许 PUT'
+            : 'CORS 规则存在，但未包含 PUT 方法',
+          details: {
+            ruleCount: rules.length,
+            sampleRule: rules[0],
+          },
+        });
+
+        if (!allowsPut) {
+          recommendations.push('将 PUT 方法加入 OSS CORS 规则。');
+        }
+      }
+    } catch (error: any) {
+      results.push({
+        category: 'CORS',
+        test: '规则',
+        status: 'warning',
+        message: `无法获取 CORS 配置：${error?.message || error}`,
+      });
+    }
+  }
+
+  private async checkRegionConsistency(
+    results: DiagnosisResult[],
+    criticalIssues: string[],
+    recommendations: string[],
+  ) {
+    if (!this.client || !this.bucket || !this.region) {
+      return;
+    }
+
+    try {
+      const location = await this.client.getBucketLocation(this.bucket);
+      const actualRegion = (location?.location || location?.Location) ?? 'unknown';
+
+      if (actualRegion !== this.region) {
+        results.push({
+          category: 'Region',
+          test: '匹配',
+          status: 'fail',
+          message: `Region 不匹配：配置 ${this.region} vs 实际 ${actualRegion}`,
+        });
+        criticalIssues.push('OSS 区域配置与实际不一致');
+        recommendations.push(`将 OSS_REGION 设置为 ${actualRegion}`);
+      } else {
+        results.push({
+          category: 'Region',
+          test: '匹配',
+          status: 'pass',
+          message: `Region 校验通过：${actualRegion}`,
+        });
+      }
+    } catch (error: any) {
+      results.push({
+        category: 'Region',
+        test: '匹配',
+        status: 'warning',
+        message: `无法获取 Bucket Region：${error?.message || error}`,
       });
     }
   }
@@ -963,142 +445,36 @@ export class UploadDeepDiagnosisService {
     criticalIssues: string[],
     recommendations: string[],
   ) {
-    if (!this.s3) {
+    if (!this.client || !this.bucket) {
       return;
     }
 
+    const key = `diagnosis/upload-test-${Date.now()}.txt`;
+    const content = Buffer.from('diagnosis-upload-test');
+
     try {
-      const bucket = this.configService.get<string>('AWS_S3_BUCKET');
-      const testKey = `diagnosis/test-upload-${Date.now()}.txt`;
-      const testContent = 'This is a test upload from diagnosis service';
-      const testContentType = 'text/plain';
+      await this.client.put(key, content, {
+        headers: { 'Content-Type': 'text/plain' },
+      });
 
-      // 生成预签名URL
-      const presignedUrl = await this.s3.getSignedUrlPromise('putObject', {
-        Bucket: bucket,
-        Key: testKey,
-        ContentType: testContentType,
-        Expires: 300,
-      } as any);
+      results.push({
+        category: '写入测试',
+        test: 'PutObject',
+        status: 'pass',
+        message: '使用 AccessKey 成功写入 OSS',
+        details: { key },
+      });
 
-      // 尝试实际上传（使用 AWS SDK 直接上传来验证权限）
-      try {
-        await this.s3
-          .putObject({
-            Bucket: bucket,
-            Key: testKey,
-            Body: testContent,
-            ContentType: testContentType,
-          })
-          .promise();
-
-        results.push({
-          category: '实际上传测试',
-          test: '文件上传（直接）',
-          status: 'pass',
-          message: '直接上传测试成功（使用AWS SDK）',
-          details: {
-            method: 'AWS SDK putObject',
-          },
-        });
-
-        // 清理测试文件
-        try {
-          await this.s3.deleteObject({ Bucket: bucket, Key: testKey }).promise();
-        } catch (e) {
-          // 忽略清理错误
-        }
-
-        // 测试预签名URL上传（如果环境支持fetch）
-        try {
-          // 检查是否支持fetch（Node.js 18+）
-          if (typeof fetch !== 'undefined') {
-            const response = await fetch(presignedUrl, {
-              method: 'PUT',
-              body: testContent,
-              headers: {
-                'Content-Type': testContentType,
-              },
-            });
-
-            if (response.ok) {
-              results.push({
-                category: '实际上传测试',
-                test: '文件上传（预签名URL）',
-                status: 'pass',
-                message: '预签名URL上传测试成功',
-                details: {
-                  status: response.status,
-                  statusText: response.statusText,
-                },
-              });
-
-              // 清理测试文件
-              try {
-                await this.s3.deleteObject({ Bucket: bucket, Key: testKey }).promise();
-              } catch (e) {
-                // 忽略清理错误
-              }
-            } else {
-              const errorText = await response.text().catch(() => '无法读取错误信息');
-              results.push({
-                category: '实际上传测试',
-                test: '文件上传（预签名URL）',
-                status: 'fail',
-                message: `预签名URL上传失败: ${response.status} ${response.statusText}`,
-                details: {
-                  status: response.status,
-                  statusText: response.statusText,
-                  error: errorText.substring(0, 500),
-                },
-              });
-              criticalIssues.push(`预签名URL上传失败: ${response.status}`);
-              recommendations.push('检查IAM权限、存储桶策略和CORS配置');
-            }
-          } else {
-            results.push({
-              category: '实际上传测试',
-              test: '文件上传（预签名URL）',
-              status: 'warning',
-              message: '无法测试预签名URL上传（环境不支持fetch）',
-              details: {
-                note: '直接上传测试已通过，预签名URL需要在前端测试',
-              },
-            });
-          }
-        } catch (error: any) {
-          results.push({
-            category: '实际上传测试',
-            test: '文件上传（预签名URL）',
-            status: 'fail',
-            message: `预签名URL上传请求失败: ${error.message}`,
-            details: {
-              error: error.message,
-            },
-          });
-          criticalIssues.push('预签名URL上传请求失败');
-        }
-      } catch (error: any) {
-        results.push({
-          category: '实际上传测试',
-          test: '文件上传（直接）',
-          status: 'fail',
-          message: `直接上传失败: ${error.code || error.message}`,
-          details: {
-            errorCode: error.code,
-            errorMessage: error.message,
-          },
-        });
-        criticalIssues.push('直接上传失败，可能是IAM权限问题');
-        recommendations.push('检查IAM用户是否有 s3:PutObject 权限');
-      }
+      await this.client.delete(key).catch(() => undefined);
     } catch (error: any) {
       results.push({
-        category: '实际上传测试',
-        test: '实际上传测试',
+        category: '写入测试',
+        test: 'PutObject',
         status: 'fail',
-        message: `测试实际上传失败: ${error.message}`,
+        message: `写入 OSS 失败：${error?.message || error}`,
       });
+      criticalIssues.push('AccessKey 缺少 PutObject 权限或 Bucket 拒绝写入');
+      recommendations.push('检查 RAM 策略是否包含 oss:PutObject，或确认 Bucket ACL。');
     }
   }
 
@@ -1107,286 +483,47 @@ export class UploadDeepDiagnosisService {
     criticalIssues: string[],
     recommendations: string[],
   ) {
-    if (!this.s3) {
+    if (!this.client || !this.bucket) {
       return;
     }
 
     try {
-      const region = this.configService.get<string>('AWS_REGION');
-      const bucket = this.configService.get<string>('AWS_S3_BUCKET');
-      const s3Endpoint = `https://s3.${region}.amazonaws.com`;
-
-      // 尝试连接S3端点（使用AWS SDK测试）
-      try {
-        // 使用headBucket来测试连接
-        await this.s3.headBucket({ Bucket: bucket }).promise();
-
-        results.push({
-          category: '网络连接',
-          test: 'S3端点连接',
-          status: 'pass',
-          message: `可以连接到S3端点: ${s3Endpoint}`,
-          details: {
-            endpoint: s3Endpoint,
-            method: 'AWS SDK headBucket',
-          },
-        });
-      } catch (error: any) {
-        results.push({
-          category: '网络连接',
-          test: 'S3端点连接',
-          status: 'warning',
-          message: `无法连接到S3端点: ${error.code || error.message}`,
-          details: {
-            endpoint: s3Endpoint,
-            errorCode: error.code,
-            errorMessage: error.message,
-          },
-        });
-        recommendations.push('检查网络连接和防火墙设置');
-      }
+      await this.client.list(
+        {
+          prefix: 'diagnosis/',
+          'max-keys': 1,
+        },
+        { timeout: 4000 },
+      );
+      results.push({
+        category: '网络',
+        test: '连接性',
+        status: 'pass',
+        message: '能够连通 OSS 端点并完成 List 请求',
+        details: {
+          endpoint: this.endpoint || `${this.bucket}.${this.region}.aliyuncs.com`,
+        },
+      });
     } catch (error: any) {
       results.push({
-        category: '网络连接',
-        test: '网络连接检查',
+        category: '网络',
+        test: '连接性',
         status: 'warning',
-        message: `检查网络连接失败: ${error.message}`,
+        message: `无法进行 HEAD 请求：${error?.message || error}`,
       });
+      recommendations.push('检查服务器能否访问 OSS 域名（DNS / 防火墙 / 代理）。');
     }
   }
 
-  private async checkSignatureVersion(
-    results: DiagnosisResult[],
-    criticalIssues: string[],
-    recommendations: string[],
-  ) {
-    if (!this.s3) {
-      return;
-    }
-
-    try {
-      const bucket = this.configService.get<string>('AWS_S3_BUCKET');
-      const presignedUrl = await this.s3.getSignedUrlPromise('putObject', {
-        Bucket: bucket,
-        Key: 'test',
-        Expires: 300,
-      } as any);
-
-      const url = new URL(presignedUrl);
-      const algorithm = url.searchParams.get('X-Amz-Algorithm');
-
-      if (algorithm === 'AWS4-HMAC-SHA256') {
-        results.push({
-          category: '签名版本',
-          test: '签名算法版本',
-          status: 'pass',
-          message: '使用正确的签名算法 (AWS4-HMAC-SHA256)',
-        });
-      } else {
-        results.push({
-          category: '签名版本',
-          test: '签名算法版本',
-          status: 'fail',
-          message: `签名算法不正确: ${algorithm}`,
-          details: {
-            current: algorithm,
-            expected: 'AWS4-HMAC-SHA256',
-          },
-        });
-        criticalIssues.push('签名算法版本不正确');
+  private getConfigValue(...keys: string[]) {
+    for (const key of keys) {
+      const value = this.configService.get<string>(key);
+      if (value) {
+        return value;
       }
-    } catch (error: any) {
-      results.push({
-        category: '签名版本',
-        test: '签名版本检查',
-        status: 'fail',
-        message: `检查签名版本失败: ${error.message}`,
-      });
     }
-  }
-
-  /**
-   * 检查存储桶策略是否生效
-   * 验证策略是否包含必要的 PutObject 权限
-   */
-  async checkPolicyEffectiveness(): Promise<{
-    success: boolean;
-    policyExists: boolean;
-    currentPolicy?: any;
-    hasPutObject: boolean;
-    hasGetObject: boolean;
-    hasPutObjectAcl: boolean;
-    policyDetails: {
-      statements: number;
-      actions: string[];
-      principals: string[];
-    };
-    message: string;
-    recommendations?: string[];
-  }> {
-    if (!this.s3) {
-      return {
-        success: false,
-        policyExists: false,
-        hasPutObject: false,
-        hasGetObject: false,
-        hasPutObjectAcl: false,
-        policyDetails: {
-          statements: 0,
-          actions: [],
-          principals: [],
-        },
-        message: 'S3 客户端未初始化',
-        recommendations: ['检查 AWS 环境变量配置'],
-      };
-    }
-
-    try {
-      const bucket = this.configService.get<string>('AWS_S3_BUCKET');
-
-      // 尝试获取存储桶策略
-      try {
-        const policyResponse = await this.s3.getBucketPolicy({ Bucket: bucket }).promise();
-        const policyDoc = JSON.parse(policyResponse.Policy || '{}');
-
-        // 分析策略
-        const statements = policyDoc.Statement || [];
-        const allActions: string[] = [];
-        const allPrincipals: string[] = [];
-
-        statements.forEach((stmt: any) => {
-          if (stmt.Effect === 'Allow') {
-            // 收集所有 Actions
-            if (Array.isArray(stmt.Action)) {
-              allActions.push(...stmt.Action);
-            } else if (stmt.Action) {
-              allActions.push(stmt.Action);
-            }
-
-            // 收集所有 Principals
-            if (stmt.Principal) {
-              if (typeof stmt.Principal === 'string') {
-                allPrincipals.push(stmt.Principal);
-              } else if (stmt.Principal['*']) {
-                allPrincipals.push('*');
-              } else if (typeof stmt.Principal === 'object') {
-                Object.keys(stmt.Principal).forEach((key) => {
-                  if (Array.isArray(stmt.Principal[key])) {
-                    allPrincipals.push(...stmt.Principal[key]);
-                  } else {
-                    allPrincipals.push(stmt.Principal[key]);
-                  }
-                });
-              }
-            }
-          }
-        });
-
-        // 检查权限
-        const hasPutObject = allActions.some(
-          (action) =>
-            action === 's3:PutObject' ||
-            action === 's3:PutObject*' ||
-            action === 's3:*' ||
-            (typeof action === 'string' && action.includes('PutObject')),
-        );
-
-        const hasGetObject = allActions.some(
-          (action) =>
-            action === 's3:GetObject' ||
-            action === 's3:GetObject*' ||
-            action === 's3:*' ||
-            (typeof action === 'string' && action.includes('GetObject')),
-        );
-
-        const hasPutObjectAcl = allActions.some(
-          (action) =>
-            action === 's3:PutObjectAcl' ||
-            action === 's3:PutObjectAcl*' ||
-            action === 's3:*' ||
-            (typeof action === 'string' && action.includes('PutObjectAcl')),
-        );
-
-        const recommendations: string[] = [];
-        if (!hasPutObject) {
-          recommendations.push('存储桶策略缺少 s3:PutObject 权限，需要添加该权限');
-        }
-        if (!hasGetObject) {
-          recommendations.push('存储桶策略缺少 s3:GetObject 权限，需要添加该权限');
-        }
-
-        return {
-          success: true,
-          policyExists: true,
-          currentPolicy: policyDoc,
-          hasPutObject,
-          hasGetObject,
-          hasPutObjectAcl,
-          policyDetails: {
-            statements: statements.length,
-            actions: [...new Set(allActions)],
-            principals: [...new Set(allPrincipals)],
-          },
-          message: hasPutObject
-            ? '✅ 存储桶策略已生效，包含 PutObject 权限'
-            : '⚠️ 存储桶策略已生效，但缺少 PutObject 权限',
-          recommendations: recommendations.length > 0 ? recommendations : undefined,
-        };
-      } catch (error: any) {
-        if (error.code === 'NoSuchBucketPolicy') {
-          return {
-            success: true,
-            policyExists: false,
-            hasPutObject: false,
-            hasGetObject: false,
-            hasPutObjectAcl: false,
-            policyDetails: {
-              statements: 0,
-              actions: [],
-              principals: [],
-            },
-            message: '存储桶策略未配置（可能依赖IAM策略）',
-            recommendations: [
-              '如果使用预签名URL上传，确保IAM用户有 s3:PutObject 权限',
-              '或者添加存储桶策略以明确允许上传',
-            ],
-          };
-        } else {
-          return {
-            success: false,
-            policyExists: false,
-            hasPutObject: false,
-            hasGetObject: false,
-            hasPutObjectAcl: false,
-            policyDetails: {
-              statements: 0,
-              actions: [],
-              principals: [],
-            },
-            message: `无法获取存储桶策略: ${error.code || error.message}`,
-            recommendations: [
-              '检查IAM用户是否有 s3:GetBucketPolicy 权限',
-              '检查存储桶名称是否正确',
-            ],
-          };
-        }
-      }
-    } catch (error: any) {
-      return {
-        success: false,
-        policyExists: false,
-        hasPutObject: false,
-        hasGetObject: false,
-        hasPutObjectAcl: false,
-        policyDetails: {
-          statements: 0,
-          actions: [],
-          principals: [],
-        },
-        message: `检查存储桶策略失败: ${error.message}`,
-        recommendations: ['检查AWS配置和网络连接'],
-      };
-    }
+    return undefined;
   }
 }
+
 

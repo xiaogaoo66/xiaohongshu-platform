@@ -26,13 +26,13 @@ export class UploadController {
   @UseGuards(JwtAuthGuard)
   @Get('test-config')
   async testConfig() {
-    return this.uploadService.testAWSConfig();
+    return this.uploadService.testOssConfig();
   }
 
   @Get('diagnose')
   async diagnose() {
     console.log('🔍 开始诊断上传配置...');
-    return this.uploadService.testAWSConfig();
+    return this.uploadService.testOssConfig();
   }
 
   @Get('deep-diagnosis')

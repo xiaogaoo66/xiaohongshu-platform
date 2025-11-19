@@ -13,89 +13,102 @@ export class ContentService {
   ) {}
 
   /**
-   * 从S3 URL中提取key
-   * 支持多种S3 URL格式：
-   * - https://bucket.s3.region.amazonaws.com/uploads/file.jpg
-   * - https://bucket.s3-region.amazonaws.com/uploads/file.jpg
-   * - https://s3.region.amazonaws.com/bucket/uploads/file.jpg
+   * 从 OSS/S3 URL 中提取对象 key
+   * 支持虚拟主机、路径风格以及自定义域名（与 OSS_PUBLIC_BASE_URL 一致）
    */
-  private extractS3Key(url: string): string | null {
+  private extractStorageKey(url: string): string | null {
     try {
-      // 检查是否是S3 URL
       if (!url || typeof url !== 'string') {
         return null;
       }
 
-      // 检查是否是S3 URL格式
-      if (!url.includes('amazonaws.com') && !url.includes('.s3.')) {
-        console.warn(`⚠️ 不是S3 URL格式: ${url}`);
+      const urlObj = new URL(url);
+      const rawPath = urlObj.pathname.replace(/^\/+/, '');
+      if (!rawPath) {
+        console.warn(`⚠️ URL 中没有有效路径: ${url}`);
         return null;
       }
 
-      const urlObj = new URL(url);
-      // 移除开头的斜杠
-      let key = urlObj.pathname.substring(1);
-      
-      // 如果是路径格式的URL (s3.region.amazonaws.com/bucket/key)，需要移除bucket部分
-      if (url.includes('s3.') && !url.includes('.s3.')) {
-        // 格式: https://s3.region.amazonaws.com/bucket/key
-        const parts = key.split('/');
-        if (parts.length > 1) {
-          // 移除bucket部分，保留key
-          key = parts.slice(1).join('/');
+      const { bucket, publicBaseUrl } = this.uploadService.getEndpointInfo();
+      const hostname = urlObj.hostname.toLowerCase();
+
+      const whitelistedHosts: string[] = [];
+      if (publicBaseUrl) {
+        try {
+          whitelistedHosts.push(new URL(publicBaseUrl).hostname.toLowerCase());
+        } catch {
+          // 忽略非法的 publicBaseUrl 值
         }
       }
-      
+
+      const looksLikeStorageHost =
+        hostname.includes('amazonaws.com') ||
+        hostname.includes('.s3.') ||
+        hostname.includes('aliyuncs.com') ||
+        hostname.includes('.oss-') ||
+        whitelistedHosts.includes(hostname);
+
+      if (!looksLikeStorageHost) {
+        console.warn(`⚠️ URL 不属于 OSS/S3 域名，跳过删除: ${url}`);
+        return null;
+      }
+
+      let key = rawPath;
+
+      if (bucket) {
+        const hostContainsBucket = hostname.includes(bucket.toLowerCase());
+        if (!hostContainsBucket && key.startsWith(`${bucket}/`)) {
+          key = key.substring(bucket.length + 1);
+        }
+      }
+
       if (!key) {
         console.warn(`⚠️ 无法从URL提取key: ${url}`);
         return null;
       }
-      
-      // 解码 URL 编码的字符（S3 中存储的实际文件名可能是未编码的）
-      // 例如：%E9%87%91%E6%AF%9B%E5%B9%BC%E7%8A%AC -> 金毛幼犬
+
       try {
         const decodedKey = decodeURIComponent(key);
         console.log(`✅ 从URL提取key成功: ${url} -> ${decodedKey} (原始: ${key})`);
         return decodedKey;
       } catch (decodeError) {
-        // 如果解码失败，使用原始 key
         console.log(`✅ 从URL提取key成功（未解码）: ${url} -> ${key}`);
         return key;
       }
     } catch (error) {
-      console.warn(`⚠️ 无法从URL提取S3 key: ${url}`, error);
+      console.warn(`⚠️ 无法从URL提取对象 key: ${url}`, error);
       return null;
     }
   }
 
   /**
-   * 删除内容关联的S3图片文件
+   * 删除内容关联的存储（OSS/S3）图片文件
    */
-  private async deleteS3Images(images: any): Promise<void> {
+  private async deleteStorageImages(images: any): Promise<void> {
     if (!images || !Array.isArray(images)) {
-      console.warn('⚠️ deleteS3Images: images为空或不是数组', images);
+      console.warn('⚠️ deleteStorageImages: images为空或不是数组', images);
       return;
     }
 
-    console.log(`🗑️ 开始删除S3图片，共 ${images.length} 张`);
+    console.log(`🗑️ 开始删除存储图片，共 ${images.length} 张`);
     
     let successCount = 0;
     let failCount = 0;
 
-    // 遍历所有图片URL，删除S3中的文件
+    // 遍历所有图片URL，删除存储中的文件
     for (const imageUrl of images) {
       if (typeof imageUrl === 'string') {
         console.log(`🔍 处理图片URL: ${imageUrl}`);
-        const key = this.extractS3Key(imageUrl);
+        const key = this.extractStorageKey(imageUrl);
         if (key) {
           try {
             await this.uploadService.deleteFile(key);
             successCount++;
-            console.log(`✅ 已删除S3文件: ${key}`);
+            console.log(`✅ 已删除存储文件: ${key}`);
           } catch (error: any) {
             failCount++;
             // 记录错误但不抛出，避免影响主流程
-            console.error(`❌ 删除S3文件失败: ${key}`, {
+            console.error(`❌ 删除存储文件失败: ${key}`, {
               error: error.message,
               stack: error.stack,
             });
@@ -109,7 +122,7 @@ export class ContentService {
       }
     }
     
-    console.log(`📊 S3图片删除完成: 成功 ${successCount} 张，失败 ${failCount} 张`);
+    console.log(`📊 存储图片删除完成: 成功 ${successCount} 张，失败 ${failCount} 张`);
   }
 
   async create(createContentDto: CreateContentDto) {
@@ -148,9 +161,9 @@ export class ContentService {
   async remove(id: string) {
     const content = await this.findOne(id);
     
-    // 先删除S3中的图片文件
+    // 先删除 OSS/S3 中的图片文件
     if (content.images) {
-      await this.deleteS3Images(content.images);
+      await this.deleteStorageImages(content.images);
     }
     
     // 然后删除数据库记录
@@ -174,10 +187,10 @@ export class ContentService {
         },
       });
 
-      // 删除所有关联的S3图片文件
+      // 删除所有关联的 OSS/S3 图片文件
       for (const content of contentsToDelete) {
         if (content.images) {
-          await this.deleteS3Images(content.images);
+          await this.deleteStorageImages(content.images);
         }
       }
 
@@ -262,10 +275,10 @@ export class ContentService {
       images: content.images,
     });
 
-    // 先删除S3中的图片文件
+    // 先删除 OSS/S3 中的图片文件
     if (imagesArray.length > 0) {
-      console.log(`🗑️ 开始删除S3图片...`);
-      await this.deleteS3Images(imagesArray);
+      console.log(`🗑️ 开始删除存储图片...`);
+      await this.deleteStorageImages(imagesArray);
     } else {
       console.warn(`⚠️ 内容没有图片或图片数组为空: ${contentId}`);
     }
@@ -280,7 +293,7 @@ export class ContentService {
   }
 
   /**
-   * 根据图片URL数组删除S3中的图片文件
+   * 根据图片URL数组删除存储中的图片文件
    * 用于用户查看完内容后删除图片（保留用于兼容性）
    */
   async deleteImagesByUrls(imageUrls: string[]): Promise<void> {
@@ -288,7 +301,7 @@ export class ContentService {
       return;
     }
 
-    await this.deleteS3Images(imageUrls);
+    await this.deleteStorageImages(imageUrls);
   }
 
   async getCount() {

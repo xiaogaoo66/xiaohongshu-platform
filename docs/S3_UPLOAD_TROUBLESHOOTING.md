@@ -1,5 +1,7 @@
 # S3 上传 403 错误排查指南
 
+> 说明：系统已默认迁移到阿里云 OSS。推荐先运行 `node scripts/check-oss-upload-config.js` 完成体检，以下内容保留 AWS S3 的排查步骤，供仍在使用 S3 的环境参考。
+
 ## 检查清单
 
 ### ✅ 1. IAM 用户权限（已确认）
@@ -52,7 +54,7 @@
 
 运行检查脚本：
 ```bash
-node scripts/check-s3-upload-config.js
+node scripts/check-oss-upload-config.js
 ```
 
 脚本会：

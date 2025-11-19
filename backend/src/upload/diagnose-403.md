@@ -1,5 +1,7 @@
 # 🔍 403 Forbidden 错误详细诊断指南
 
+> 说明：系统已切换至阿里云 OSS，相关环境变量命名为 `OSS_*`。如仍在使用 AWS S3，可继续沿用 `AWS_*`，后端会自动兼容；本文档内容保留 AWS 语境以方便迁移过程中的排查。
+
 ## 问题现象
 
 - ✅ 预签名 URL 可以成功生成
@@ -72,8 +74,8 @@
 
 **检查方法**：
 1. 在 S3 控制台查看存储桶的实际区域
-2. 确保后端 `AWS_REGION` 环境变量与存储桶区域一致
-3. 确保后端 `AWS_S3_BUCKET` 环境变量与存储桶名称完全一致（大小写敏感）
+2. 确保后端 `OSS_REGION`（或 `AWS_REGION`）环境变量与存储桶区域一致
+3. 确保后端 `OSS_BUCKET`（或 `AWS_S3_BUCKET`）环境变量与存储桶名称完全一致（大小写敏感）
 
 ## 诊断步骤
 
@@ -108,9 +110,9 @@
 ## 快速修复清单
 
 - [ ] IAM 用户已附加 `AmazonS3FullAccess` 策略
-- [ ] 后端环境变量 `AWS_ACCESS_KEY_ID` 和 `AWS_SECRET_ACCESS_KEY` 正确
-- [ ] 后端环境变量 `AWS_REGION` 与存储桶区域一致
-- [ ] 后端环境变量 `AWS_S3_BUCKET` 与存储桶名称完全一致
+- [ ] 后端环境变量 `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET`（或 `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`）正确
+- [ ] 后端环境变量 `OSS_REGION`（或 `AWS_REGION`）与存储桶区域一致
+- [ ] 后端环境变量 `OSS_BUCKET`（或 `AWS_S3_BUCKET`）与存储桶名称完全一致
 - [ ] 前端上传时只设置 `Content-Type` 请求头
 - [ ] 前端上传时的 `Content-Type` 与生成预签名 URL 时的 `contentType` 一致
 - [ ] 存储桶策略允许 `s3:PutObject` 操作

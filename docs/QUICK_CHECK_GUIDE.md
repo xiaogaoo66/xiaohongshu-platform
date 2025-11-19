@@ -1,5 +1,7 @@
 # S3 上传配置快速检查指南
 
+> ⚠️ 已默认迁移至 **阿里云 OSS**。如果你使用 OSS，请优先运行 `node scripts/check-oss-upload-config.js`；以下内容保留历史记录，仍可用于 AWS S3 排障。
+
 ## 检查 2-4 的详细步骤
 
 ### ✅ 检查 2: 存储桶策略是否允许 PUT 操作
@@ -34,7 +36,7 @@
 
 ```bash
 # 在项目根目录运行
-node scripts/check-s3-upload-config.js
+node scripts/check-oss-upload-config.js
 ```
 
 脚本会：
@@ -185,7 +187,7 @@ credentials: 'include',  // ← 可能添加 Cookie 头
 
 ### 1. 运行检查脚本
 ```bash
-node scripts/check-s3-upload-config.js
+node scripts/check-oss-upload-config.js
 ```
 
 ### 2. 检查后端配置

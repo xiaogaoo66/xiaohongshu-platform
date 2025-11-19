@@ -68,7 +68,7 @@ const UserClaim: React.FC = () => {
     },
   })
 
-  // 确认已领取（图片加载完成后自动调用，删除数据库和S3图片）
+  // 确认已领取（图片加载完成后自动调用，删除数据库和 OSS 图片）
   const confirmClaimedMutation = useMutation({
     mutationFn: (contentId: string) => {
       // 前端验证：确保 contentId 有效
@@ -79,7 +79,7 @@ const UserClaim: React.FC = () => {
       return contentAPI.confirmClaimed(contentId)
     },
     onSuccess: () => {
-      console.log('✅ 内容已确认删除（数据库和S3图片）')
+      console.log('✅ 内容已确认删除（数据库和 OSS 图片）')
       queryClient.invalidateQueries({ queryKey: ['contentCount'] })
     },
     onError: (error: any) => {
