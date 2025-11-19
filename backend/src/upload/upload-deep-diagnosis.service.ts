@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import OSS from 'ali-oss';
+import * as OSS from 'ali-oss';
 
 export interface DiagnosisResult {
   category: string;
@@ -149,7 +149,7 @@ export class UploadDeepDiagnosisService {
       options.endpoint = this.endpoint;
     }
 
-    this.client = new OSS(options);
+    this.client = new (OSS.default || OSS)(options);
   }
 
   private async checkEnvironmentVariables(

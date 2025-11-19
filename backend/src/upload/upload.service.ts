@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import OSS from 'ali-oss';
+import * as OSS from 'ali-oss';
 import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
@@ -151,7 +151,7 @@ export class UploadService {
       options.endpoint = this.endpoint;
     }
 
-    this.ossClient = new OSS(options);
+    this.ossClient = new (OSS.default || OSS)(options);
 
     console.log('✅ 已初始化阿里云 OSS 客户端', {
       region: this.region,
