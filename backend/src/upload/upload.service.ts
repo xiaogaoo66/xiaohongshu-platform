@@ -36,18 +36,28 @@ export class UploadService {
     const key = `uploads/${uuidv4()}-${filename}`;
 
     try {
-      const presignedUrl = this.ossClient.signatureUrl(key, {
+      const normalizedContentType =
+        contentType && contentType !== 'undefined' ? contentType : undefined;
+
+      const signatureOptions: OSS.SignatureUrlOptions = {
         method: 'PUT',
         expires: 300,
-        headers: {
-          'Content-Type': contentType,
-        },
+      };
+
+      if (normalizedContentType) {
+        signatureOptions.headers = {
+          'Content-Type': normalizedContentType,
+        };
+      }
+
+      const presignedUrl = this.ossClient.signatureUrl(key, {
+        ...signatureOptions,
       });
 
       console.log('✅ 生成 OSS 预签名 URL 成功', {
         bucket: this.bucket,
         key,
-        contentType,
+        contentType: normalizedContentType || '未指定',
         region: this.region,
       });
 
@@ -55,7 +65,7 @@ export class UploadService {
         presignedUrl,
         key,
         url: this.buildPublicUrl(key),
-        expectedContentType: contentType,
+        expectedContentType: normalizedContentType,
       };
     } catch (error: any) {
       console.error('❌ 生成 OSS 预签名 URL 失败', {
