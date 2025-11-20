@@ -73,9 +73,9 @@
 ### 4. 区域或存储桶名称不匹配
 
 **检查方法**：
-1. 在 S3 控制台查看存储桶的实际区域
-2. 确保后端 `OSS_REGION`（或 `AWS_REGION`）环境变量与存储桶区域一致
-3. 确保后端 `OSS_BUCKET`（或 `AWS_S3_BUCKET`）环境变量与存储桶名称完全一致（大小写敏感）
+1. 在 OSS 控制台查看存储桶的实际区域
+2. 确保后端 `OSS_REGION` 环境变量与存储桶区域一致
+3. 确保后端 `OSS_BUCKET` 环境变量与存储桶名称完全一致（大小写敏感）
 
 ## 诊断步骤
 
@@ -92,27 +92,27 @@
 - `📤 开始上传文件:` - 确认上传参数
 - `❌ 上传失败:` - 查看详细错误信息
 
-### 步骤 3：测试 IAM 用户权限
+### 步骤 3：测试 RAM 用户权限
 
-在 AWS IAM 控制台：
-1. 找到你的 IAM 用户
+在阿里云 RAM 控制台：
+1. 找到你的 RAM 用户
 2. 点击"权限"标签页
-3. 点击"模拟策略"（Simulate policy）
-4. 测试 `s3:PutObject` 权限
+3. 检查是否已授予 OSS 相关权限（如 `AliyunOSSFullAccess`）
+4. 测试 `oss:PutObject` 权限
 
 ### 步骤 4：检查存储桶策略
 
-在 S3 控制台：
+在 OSS 控制台：
 1. 选择你的存储桶
-2. 点击"权限"标签页
-3. 查看"存储桶策略"和"阻止公共访问"设置
+2. 点击"权限管理"标签页
+3. 查看"读写权限"和"跨域设置"
 
 ## 快速修复清单
 
-- [ ] IAM 用户已附加 `AmazonS3FullAccess` 策略
-- [ ] 后端环境变量 `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET`（或 `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`）正确
-- [ ] 后端环境变量 `OSS_REGION`（或 `AWS_REGION`）与存储桶区域一致
-- [ ] 后端环境变量 `OSS_BUCKET`（或 `AWS_S3_BUCKET`）与存储桶名称完全一致
+- [ ] RAM 用户已附加 `AliyunOSSFullAccess` 策略
+- [ ] 后端环境变量 `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` 正确
+- [ ] 后端环境变量 `OSS_REGION` 与存储桶区域一致
+- [ ] 后端环境变量 `OSS_BUCKET` 与存储桶名称完全一致
 - [ ] 前端上传时只设置 `Content-Type` 请求头
 - [ ] 前端上传时的 `Content-Type` 与生成预签名 URL 时的 `contentType` 一致
 - [ ] 存储桶策略允许 `s3:PutObject` 操作
@@ -136,5 +136,5 @@
 
 - `FIX_S3_403_ERROR.md` - 403 错误修复指南
 - `FIX_403_WITH_CORRECT_KEY.md` - 访问密钥问题修复
-- `AWS_S3_PERMISSION_FIX.md` - 权限问题修复
+- OSS 权限配置文档 - 权限问题修复
 

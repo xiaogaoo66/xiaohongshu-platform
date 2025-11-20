@@ -12,11 +12,11 @@ export class UploadService {
   private ossClient: OSS | null = null;
 
   constructor(private readonly configService: ConfigService) {
-    this.bucket = this.getConfigValue('OSS_BUCKET', 'AWS_S3_BUCKET');
-    this.region = this.getConfigValue('OSS_REGION', 'AWS_REGION');
-    this.endpoint = this.getConfigValue('OSS_ENDPOINT', 'AWS_S3_ENDPOINT');
+    this.bucket = this.configService.get<string>('OSS_BUCKET');
+    this.region = this.configService.get<string>('OSS_REGION');
+    this.endpoint = this.configService.get<string>('OSS_ENDPOINT');
     this.publicBaseUrl = this.normalizePublicBaseUrl(
-      this.getConfigValue('OSS_PUBLIC_BASE_URL', 'AWS_S3_PUBLIC_URL'),
+      this.configService.get<string>('OSS_PUBLIC_BASE_URL'),
     );
 
     this.initializeClient();
@@ -101,8 +101,8 @@ export class UploadService {
   }
 
   async testOssConfig() {
-    const accessKeyId = this.getConfigValue('OSS_ACCESS_KEY_ID', 'AWS_ACCESS_KEY_ID');
-    const accessKeySecret = this.getConfigValue('OSS_ACCESS_KEY_SECRET', 'AWS_SECRET_ACCESS_KEY');
+    const accessKeyId = this.configService.get<string>('OSS_ACCESS_KEY_ID');
+    const accessKeySecret = this.configService.get<string>('OSS_ACCESS_KEY_SECRET');
 
     const config = {
       hasAccessKeyId: !!accessKeyId,
@@ -142,8 +142,8 @@ export class UploadService {
   }
 
   private initializeClient() {
-    const accessKeyId = this.getConfigValue('OSS_ACCESS_KEY_ID', 'AWS_ACCESS_KEY_ID');
-    const accessKeySecret = this.getConfigValue('OSS_ACCESS_KEY_SECRET', 'AWS_SECRET_ACCESS_KEY');
+    const accessKeyId = this.configService.get<string>('OSS_ACCESS_KEY_ID');
+    const accessKeySecret = this.configService.get<string>('OSS_ACCESS_KEY_SECRET');
 
     if (!accessKeyId || !accessKeySecret || !this.region || !this.bucket) {
       console.warn('⚠️ OSS 配置不完整：请检查 AccessKey、Region、Bucket');
@@ -227,15 +227,6 @@ export class UploadService {
     };
   }
 
-  private getConfigValue(...keys: string[]) {
-    for (const key of keys) {
-      const value = this.configService.get<string>(key);
-      if (value) {
-        return value;
-      }
-    }
-    return undefined;
-  }
 
   private normalizePublicBaseUrl(url?: string | null) {
     if (!url) {

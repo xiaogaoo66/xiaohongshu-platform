@@ -13,23 +13,52 @@
 const DEFAULT_URL = process.env.UPLOAD_API_URL || 'http://localhost:3333';
 
 const parseArgs = () => {
-  return process.argv.slice(2).reduce((acc, curr, idx, all) => {
-    if (!curr.startsWith('--')) {
-      return acc;
+  /** @type {{ _: string[] } & Record<string, string>} */
+  const parsed = { _: [] };
+  const tokens = process.argv.slice(2);
+
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+
+    if (token === '--') {
+      continue;
     }
-    const key = curr.replace(/^--/, '');
-    const value =
-      idx + 1 < all.length && !all[idx + 1].startsWith('--') ? all[idx + 1] : 'true';
-    acc[key] = value;
-    return acc;
-  }, /** @type {Record<string, string>} */ ({}));
+
+    if (token.startsWith('--')) {
+      const withoutPrefix = token.replace(/^--/, '');
+      const [key, inlineValue] = withoutPrefix.split('=');
+
+      if (inlineValue !== undefined) {
+        parsed[key] = inlineValue;
+        continue;
+      }
+
+      if (i + 1 < tokens.length && !tokens[i + 1].startsWith('--')) {
+        parsed[key] = tokens[i + 1];
+        i++;
+        continue;
+      }
+
+      parsed[key] = 'true';
+      continue;
+    }
+
+    parsed._.push(token);
+  }
+
+  return parsed;
 };
 
 const args = parseArgs();
 
-const baseUrl = args.url || DEFAULT_URL;
-const filename = args.filename || 'diagnose.png';
-const contentType = args['content-type'] || 'image/png';
+const positionalUrl = args._[0];
+const positionalContentType = args._[1];
+const positionalFilename = args._[2];
+
+const baseUrl = args.url || args.baseUrl || positionalUrl || DEFAULT_URL;
+const filename = args.filename || positionalFilename || 'diagnose.png';
+const contentType =
+  args['content-type'] || args.contentType || positionalContentType || 'image/png';
 
 const endpoint = `${baseUrl.replace(/\/$/, '')}/api/upload/presigned-url`;
 

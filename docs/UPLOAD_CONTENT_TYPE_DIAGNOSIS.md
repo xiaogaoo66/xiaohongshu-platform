@@ -11,16 +11,20 @@
 
 ```bash
 # 默认连本地 http://localhost:3333
-node scripts/diagnose-upload-request.cjs
+npm run diagnose:upload
 
-# 指定线上域名 & 自定义 Content-Type
-node scripts/diagnose-upload-request.cjs \
+# 指定线上域名 & 自定义 Content-Type（推荐）
+npm run diagnose:upload -- \
   --url https://api.yourdomain.com \
   --filename cover.png \
   --content-type image/png
+
+# 或者直接 node 运行
+node scripts/diagnose-upload-request.cjs https://api.yourdomain.com image/png cover.png
 ```
 
-也可以设置环境变量 `UPLOAD_API_URL=https://api.yourdomain.com`，省掉 `--url`。
+- 脚本同时支持 `--url/--filename/--content-type` **flag** 以及 `url contentType filename` **位置参数**，哪种方便用哪种。
+- 也可以设置环境变量 `UPLOAD_API_URL=https://api.yourdomain.com`，省掉 `--url`/位置参数。
 
 ## 输出解读
 

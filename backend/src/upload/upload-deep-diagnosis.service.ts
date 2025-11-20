@@ -26,9 +26,9 @@ export class UploadDeepDiagnosisService {
   private client: OSS | null = null;
 
   constructor(private readonly configService: ConfigService) {
-    this.bucket = this.getConfigValue('OSS_BUCKET', 'AWS_S3_BUCKET');
-    this.region = this.getConfigValue('OSS_REGION', 'AWS_REGION');
-    this.endpoint = this.getConfigValue('OSS_ENDPOINT', 'AWS_S3_ENDPOINT');
+    this.bucket = this.configService.get<string>('OSS_BUCKET');
+    this.region = this.configService.get<string>('OSS_REGION');
+    this.endpoint = this.configService.get<string>('OSS_ENDPOINT');
 
     this.initializeClient();
   }
@@ -130,8 +130,8 @@ export class UploadDeepDiagnosisService {
   }
 
   private initializeClient() {
-    const accessKeyId = this.getConfigValue('OSS_ACCESS_KEY_ID', 'AWS_ACCESS_KEY_ID');
-    const accessKeySecret = this.getConfigValue('OSS_ACCESS_KEY_SECRET', 'AWS_SECRET_ACCESS_KEY');
+    const accessKeyId = this.configService.get<string>('OSS_ACCESS_KEY_ID');
+    const accessKeySecret = this.configService.get<string>('OSS_ACCESS_KEY_SECRET');
 
     if (!accessKeyId || !accessKeySecret || !this.region || !this.bucket) {
       return;
@@ -157,16 +157,16 @@ export class UploadDeepDiagnosisService {
     criticalIssues: string[],
     recommendations: string[],
   ) {
-    const accessKeyId = this.getConfigValue('OSS_ACCESS_KEY_ID', 'AWS_ACCESS_KEY_ID');
-    const accessKeySecret = this.getConfigValue('OSS_ACCESS_KEY_SECRET', 'AWS_SECRET_ACCESS_KEY');
+    const accessKeyId = this.configService.get<string>('OSS_ACCESS_KEY_ID');
+    const accessKeySecret = this.configService.get<string>('OSS_ACCESS_KEY_SECRET');
     const region = this.region;
     const bucket = this.bucket;
 
     const missing: string[] = [];
-    if (!accessKeyId) missing.push('OSS_ACCESS_KEY_ID（或 AWS_ACCESS_KEY_ID）');
-    if (!accessKeySecret) missing.push('OSS_ACCESS_KEY_SECRET（或 AWS_SECRET_ACCESS_KEY）');
-    if (!region) missing.push('OSS_REGION（或 AWS_REGION）');
-    if (!bucket) missing.push('OSS_BUCKET（或 AWS_S3_BUCKET）');
+    if (!accessKeyId) missing.push('OSS_ACCESS_KEY_ID');
+    if (!accessKeySecret) missing.push('OSS_ACCESS_KEY_SECRET');
+    if (!region) missing.push('OSS_REGION');
+    if (!bucket) missing.push('OSS_BUCKET');
 
     if (missing.length) {
       results.push({
@@ -515,15 +515,6 @@ export class UploadDeepDiagnosisService {
     }
   }
 
-  private getConfigValue(...keys: string[]) {
-    for (const key of keys) {
-      const value = this.configService.get<string>(key);
-      if (value) {
-        return value;
-      }
-    }
-    return undefined;
-  }
 }
 
 
