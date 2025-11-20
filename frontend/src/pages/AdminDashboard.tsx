@@ -141,7 +141,12 @@ const AdminDashboard: React.FC = () => {
           throw new Error('服务器未返回有效的上传地址')
         }
         
-        const { presignedUrl, url, useBase64 } = response.data
+        const {
+          presignedUrl,
+          url,
+          useBase64,
+          expectedContentType,
+        } = response.data
         
         // 如果后端返回 useBase64，使用 Base64 编码（临时方案）
         if (useBase64 || !presignedUrl) {
@@ -180,7 +185,7 @@ const AdminDashboard: React.FC = () => {
             'X-Amz-Date': urlParams['X-Amz-Date'],
             'X-Amz-Expires': urlParams['X-Amz-Expires'],
             'X-Amz-SignedHeaders': urlParams['X-Amz-SignedHeaders'],
-            'Content-Type': urlParams['Content-Type'],
+            'Content-Type': signedContentType || urlParams['Content-Type'],
           },
           timestamp: new Date().toISOString(),
         });
@@ -188,22 +193,27 @@ const AdminDashboard: React.FC = () => {
         const uploadStartTime = Date.now();
         
         // 检查 3: Content-Type 一致性验证
-        const expectedContentType = urlParams['Content-Type'];
-        if (file.type !== expectedContentType) {
+        const signedContentType =
+          expectedContentType || urlParams['Content-Type'];
+        if (signedContentType && file.type !== signedContentType) {
           console.error('❌ Content-Type 不匹配:', {
             前端上传时: file.type,
-            预签名URL中: expectedContentType,
+            预签名URL中: signedContentType,
             是否匹配: false,
           });
           throw new Error(
-            `Content-Type 不匹配: 前端使用 "${file.type}"，但预签名 URL 期望 "${expectedContentType}"。` +
+            `Content-Type 不匹配: 前端使用 "${file.type}"，但预签名 URL 期望 "${signedContentType}"。` +
             `请确保上传时的 Content-Type 与生成预签名 URL 时完全一致。`
           );
+        } else if (!signedContentType) {
+          console.log('ℹ️ 预签名 URL 未显式要求 Content-Type，将直接使用文件的类型', {
+            fileType: file.type,
+          });
         }
         
         // 检查 4: 准备请求头（只设置 Content-Type，不添加任何其他头）
         const requestHeaders: HeadersInit = {
-          'Content-Type': file.type,
+          'Content-Type': file.type || signedContentType || 'application/octet-stream',
         };
         
         // 验证请求头（确保没有额外的头）
@@ -247,15 +257,15 @@ const AdminDashboard: React.FC = () => {
             error: errorText,
             filename: file.name,
             contentType: file.type,
-            expectedContentType: urlParams['Content-Type'],
-            contentTypeMatch: file.type === urlParams['Content-Type'],
+            expectedContentType: signedContentType,
+            contentTypeMatch: signedContentType ? file.type === signedContentType : '未强制',
             size: file.size,
             duration: `${uploadDuration}ms`,
             requestHeaders,
             responseHeaders,
             presignedUrlParams: {
               'X-Amz-SignedHeaders': urlParams['X-Amz-SignedHeaders'],
-              'Content-Type': urlParams['Content-Type'],
+              'Content-Type': signedContentType,
             },
             urlPreview: presignedUrl.substring(0, 150) + '...',
             timestamp: new Date().toISOString(),
@@ -263,7 +273,9 @@ const AdminDashboard: React.FC = () => {
           
           // 如果是403错误，提供更详细的诊断建议
           if (uploadResponse.status === 403) {
-            const contentTypeMatch = file.type === urlParams['Content-Type'];
+            const contentTypeMatch = signedContentType
+              ? file.type === signedContentType
+              : '未强制';
             const expires = parseInt(urlParams['X-Amz-Expires'] || '0', 10);
             const isExpired = expires <= 0;
             
@@ -273,7 +285,7 @@ const AdminDashboard: React.FC = () => {
                 status: contentTypeMatch ? '✅ 已排除' : '❌ 可能',
                 details: {
                   '当前ContentType': file.type,
-                  '预签名URL中的ContentType': urlParams['Content-Type'],
+                  '预签名URL中的ContentType': signedContentType || '未强制',
                   '是否匹配': contentTypeMatch,
                 },
               },

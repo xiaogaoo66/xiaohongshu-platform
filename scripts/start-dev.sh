@@ -15,7 +15,7 @@ if [ ! -f "backend/.env" ]; then
     echo "⚠️  后端环境变量文件不存在，正在创建..."
     cp backend/env.example backend/.env
     echo "📝 请编辑 backend/.env 文件配置环境变量"
-    echo "   特别是 AWS S3 相关配置"
+    echo "   特别是 OSS 上传相关配置（OSS_ACCESS_KEY_ID / OSS_BUCKET 等）"
     read -p "按回车键继续..."
 fi
 

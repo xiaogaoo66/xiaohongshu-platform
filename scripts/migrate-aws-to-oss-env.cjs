@@ -98,3 +98,4 @@ if (hasChanges) {
   console.log('   可能已经迁移过了，或者没有找到 AWS_* 变量');
 }
 
+

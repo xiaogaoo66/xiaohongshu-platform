@@ -55,6 +55,7 @@ export class UploadService {
         presignedUrl,
         key,
         url: this.buildPublicUrl(key),
+        expectedContentType: contentType,
       };
     } catch (error: any) {
       console.error('❌ 生成 OSS 预签名 URL 失败', {
