@@ -40,7 +40,8 @@
     "gpu-check": "node gpu-check.js",
     "start-api": "node video-render-api.js",
     "test-api": "node test-api-client.js",
-    "test-props": "node props-example.js"
+    "test-props": "node props-example.js",
+    "diagnose:upload": "node scripts/diagnose-upload-request.cjs"
   },
   "sideEffects": [
     "*.css"
