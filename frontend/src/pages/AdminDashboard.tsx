@@ -172,7 +172,14 @@ const AdminDashboard: React.FC = () => {
         // 解析预签名URL，提取关键信息
         const urlObj = new URL(presignedUrl);
         const urlParams = Object.fromEntries(urlObj.searchParams.entries());
-        
+
+        const sanitizedExpectedContentType =
+          expectedContentType && expectedContentType !== 'undefined'
+            ? expectedContentType
+            : undefined;
+        const signedContentType =
+          sanitizedExpectedContentType || urlParams['Content-Type'] || undefined;
+
         console.log('📤 开始上传文件:', {
           filename: file.name,
           contentType: file.type,
@@ -185,7 +192,7 @@ const AdminDashboard: React.FC = () => {
             'X-Amz-Date': urlParams['X-Amz-Date'],
             'X-Amz-Expires': urlParams['X-Amz-Expires'],
             'X-Amz-SignedHeaders': urlParams['X-Amz-SignedHeaders'],
-            'Content-Type': signedContentType || urlParams['Content-Type'],
+            'Content-Type': signedContentType || '未指定',
           },
           timestamp: new Date().toISOString(),
         });
@@ -193,8 +200,6 @@ const AdminDashboard: React.FC = () => {
         const uploadStartTime = Date.now();
         
         // 检查 3: Content-Type 一致性验证
-        const signedContentType =
-          expectedContentType || urlParams['Content-Type'];
         if (signedContentType && file.type !== signedContentType) {
           console.error('❌ Content-Type 不匹配:', {
             前端上传时: file.type,
@@ -212,8 +217,10 @@ const AdminDashboard: React.FC = () => {
         }
         
         // 检查 4: 准备请求头（只设置 Content-Type，不添加任何其他头）
+        const effectiveContentType =
+          file.type || signedContentType || 'application/octet-stream';
         const requestHeaders: HeadersInit = {
-          'Content-Type': file.type || signedContentType || 'application/octet-stream',
+          'Content-Type': effectiveContentType,
         };
         
         // 验证请求头（确保没有额外的头）
@@ -228,7 +235,9 @@ const AdminDashboard: React.FC = () => {
           url: presignedUrl.substring(0, 150) + '...',
           headers: requestHeaders,
           bodySize: file.size,
-          contentTypeMatch: file.type === expectedContentType,
+          contentTypeMatch: signedContentType
+            ? file.type === signedContentType
+            : '未强制',
         });
         
         // 使用 fetch 直接上传（不使用 axios，避免自动添加请求头）
