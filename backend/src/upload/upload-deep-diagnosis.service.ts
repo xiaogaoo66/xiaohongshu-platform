@@ -145,7 +145,9 @@ export class UploadDeepDiagnosisService {
       secure: true,
     };
 
-    if (this.endpoint) {
+    // 只有当 endpoint 有值且不为空字符串时才设置
+    // 空字符串表示让 ali-oss 库根据 region 自动推导 endpoint
+    if (this.endpoint && this.endpoint.trim()) {
       options.endpoint = this.endpoint;
     }
 

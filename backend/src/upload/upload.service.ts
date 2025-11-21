@@ -36,8 +36,16 @@ export class UploadService {
     const key = `uploads/${uuidv4()}-${filename}`;
 
     try {
-      const normalizedContentType =
+      // 规范化 Content-Type：移除 charset 参数，确保签名一致性
+      // 因为浏览器通常不包含 charset，而某些客户端可能包含
+      let normalizedContentType =
         contentType && contentType !== 'undefined' ? contentType : undefined;
+
+      if (normalizedContentType) {
+        // 移除 charset 参数，只保留主类型和子类型
+        // 例如: "text/plain; charset=utf-8" -> "text/plain"
+        normalizedContentType = normalizedContentType.split(';')[0].trim();
+      }
 
       const signatureOptions: OSS.SignatureUrlOptions = {
         method: 'PUT',
@@ -158,7 +166,9 @@ export class UploadService {
       secure: true,
     };
 
-    if (this.endpoint) {
+    // 只有当 endpoint 有值且不为空字符串时才设置
+    // 空字符串表示让 ali-oss 库根据 region 自动推导 endpoint
+    if (this.endpoint && this.endpoint.trim()) {
       options.endpoint = this.endpoint;
     }
 
@@ -167,7 +177,7 @@ export class UploadService {
     console.log('✅ 已初始化阿里云 OSS 客户端', {
       region: this.region,
       bucket: this.bucket,
-      endpoint: this.endpoint || '默认（region）',
+      endpoint: this.endpoint && this.endpoint.trim() ? this.endpoint : '自动推导（根据 region）',
     });
   }
 
@@ -210,7 +220,8 @@ export class UploadService {
       return `${this.publicBaseUrl}/${key}`;
     }
 
-    if (this.endpoint) {
+    // 只有当 endpoint 有值且不为空字符串时才使用
+    if (this.endpoint && this.endpoint.trim()) {
       const cleaned = this.endpoint.replace(/^https?:\/\//, '');
       return `https://${this.bucket}.${cleaned}/${key}`;
     }
