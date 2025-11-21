@@ -16,14 +16,14 @@ if [ ! -f "backend/.env" ]; then
     exit 1
 fi
 
-# 检查必要的环境变量（优先 OSS，兼容 AWS）
-if ! grep -q "OSS_ACCESS_KEY_ID" backend/.env && ! grep -q "AWS_ACCESS_KEY_ID" backend/.env; then
-    echo "❌ 请在 backend/.env 中配置 OSS_ACCESS_KEY_ID（或兼容的 AWS_ACCESS_KEY_ID）"
+# 检查必要的环境变量
+if ! grep -q "OSS_ACCESS_KEY_ID" backend/.env; then
+    echo "❌ 请在 backend/.env 中配置 OSS_ACCESS_KEY_ID"
     exit 1
 fi
 
-if ! grep -q "OSS_ACCESS_KEY_SECRET" backend/.env && ! grep -q "AWS_SECRET_ACCESS_KEY" backend/.env; then
-    echo "❌ 请在 backend/.env 中配置 OSS_ACCESS_KEY_SECRET（或兼容的 AWS_SECRET_ACCESS_KEY）"
+if ! grep -q "OSS_ACCESS_KEY_SECRET" backend/.env; then
+    echo "❌ 请在 backend/.env 中配置 OSS_ACCESS_KEY_SECRET"
     exit 1
 fi
 

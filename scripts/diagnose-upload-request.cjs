@@ -4,7 +4,7 @@
  * Quick diagnostic tool for OSS presigned URL generation.
  *
  * Usage:
- *   node scripts/diagnose-upload-request.cjs --url https://api.example.com --filename test.png --content-type image/png
+ *   node scripts/diagnose-upload-request.cjs --url https://api.example.com --filename test.png --content-type image/png [--token <JWT>]
  *
  * The script will POST to /api/upload/presigned-url and print whether the server
  * returns the same Content-Type as the client sends, plus other helpful metadata.
@@ -59,6 +59,7 @@ const baseUrl = args.url || args.baseUrl || positionalUrl || DEFAULT_URL;
 const filename = args.filename || positionalFilename || 'diagnose.png';
 const contentType =
   args['content-type'] || args.contentType || positionalContentType || 'image/png';
+const authToken = args.token || args.auth || process.env.UPLOAD_API_TOKEN;
 
 const endpoint = `${baseUrl.replace(/\/$/, '')}/api/upload/presigned-url`;
 
@@ -106,11 +107,20 @@ const main = async () => {
   printDivider();
   console.log('请求目标:', endpoint);
   console.log('请求参数:', payload);
+  console.log('附带 Authorization 头:', authToken ? '✅ 是' : '❌ 否');
 
   const startedAt = performance.now();
+  const headers = { 'Content-Type': 'application/json' };
+
+  if (authToken) {
+    headers.Authorization = authToken.startsWith('Bearer ')
+      ? authToken
+      : `Bearer ${authToken}`;
+  }
+
   const response = await fetchImpl(endpoint, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(payload),
   }).catch((error) => {
     console.error('❌ 请求失败：', error?.message || error);

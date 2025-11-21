@@ -1,6 +1,6 @@
 # S3 上传配置快速检查指南
 
-> ⚠️ 已默认迁移至 **阿里云 OSS**。如果你使用 OSS，请优先运行 `node scripts/check-oss-upload-config.js`；以下内容保留历史记录，仍可用于 AWS S3 排障。
+> ⚠️ 系统已默认迁移至 **阿里云 OSS**。若当前环境使用 OSS，请改用新的诊断脚本 `node scripts/deep-diagnose-oss.cjs`（可加 `--json`、`--skip-upload` 等参数）完成全链路体检。下文内容仅保留 AWS S3 相关排障步骤，方便仍在使用 S3 的历史环境参考。
 
 ## 检查 2-4 的详细步骤
 
@@ -32,17 +32,9 @@
      - ✅ **这是正常的！** 只要 IAM 用户有 `s3:PutObject` 权限即可
      - 存储桶策略是可选的
 
-#### 方法 B: 使用脚本检查
+#### 方法 B: 使用脚本检查（已废弃）
 
-```bash
-# 在项目根目录运行
-node scripts/check-oss-upload-config.js
-```
-
-脚本会：
-- 尝试读取存储桶策略
-- 检查是否有允许 PUT 操作的策略
-- 如果无法读取，会提示这是正常的（IAM 权限已足够）
+> 旧脚本 `scripts/check-oss-upload-config.js` 已移除，请使用 **方法 A** 或 **C**。若你已迁移至 OSS，请改用 `node scripts/deep-diagnose-oss.cjs` 获取等价的体检能力。
 
 #### 方法 C: 使用 AWS CLI
 
@@ -185,10 +177,12 @@ credentials: 'include',  // ← 可能添加 Cookie 头
 
 ## 快速诊断命令
 
-### 1. 运行检查脚本
+### 1. 运行 OSS 诊断脚本（如已完成迁移）
 ```bash
-node scripts/check-oss-upload-config.js
+node scripts/deep-diagnose-oss.cjs
 ```
+- 如需跳过实际写操作：`node scripts/deep-diagnose-oss.cjs --skip-upload`
+- 仅输出 JSON 供 CI 解析：`node scripts/deep-diagnose-oss.cjs --json`
 
 ### 2. 检查后端配置
 ```bash

@@ -177,8 +177,12 @@ const AdminDashboard: React.FC = () => {
           expectedContentType && expectedContentType !== 'undefined'
             ? expectedContentType
             : undefined;
+        const sanitizedUrlContentType =
+          urlParams['Content-Type'] && urlParams['Content-Type'] !== 'undefined'
+            ? urlParams['Content-Type']
+            : undefined;
         const signedContentType =
-          sanitizedExpectedContentType || urlParams['Content-Type'] || undefined;
+          sanitizedExpectedContentType || sanitizedUrlContentType || undefined;
 
         console.log('📤 开始上传文件:', {
           filename: file.name,
@@ -187,11 +191,20 @@ const AdminDashboard: React.FC = () => {
           bucket: urlObj.hostname.split('.')[0],
           key: urlObj.pathname.substring(1),
           presignedUrlParams: {
+            // AWS 旧参数（保持兼容）
             'X-Amz-Algorithm': urlParams['X-Amz-Algorithm'],
-            'X-Amz-Credential': urlParams['X-Amz-Credential']?.substring(0, 20) + '...',
+            'X-Amz-Credential': urlParams['X-Amz-Credential']
+              ? `${urlParams['X-Amz-Credential']?.substring(0, 20)}...`
+              : undefined,
             'X-Amz-Date': urlParams['X-Amz-Date'],
             'X-Amz-Expires': urlParams['X-Amz-Expires'],
             'X-Amz-SignedHeaders': urlParams['X-Amz-SignedHeaders'],
+            // OSS 新参数
+            OSSAccessKeyId: urlParams['OSSAccessKeyId']
+              ? `${urlParams['OSSAccessKeyId']?.substring(0, 6)}***`
+              : undefined,
+            Expires: urlParams['Expires'],
+            Signature: urlParams['Signature'] ? '[已隐藏]' : undefined,
             'Content-Type': signedContentType || '未指定',
           },
           timestamp: new Date().toISOString(),

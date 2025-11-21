@@ -94,10 +94,9 @@ async function main() {
   console.log('   请确认 backend/.env 文件包含以下配置：');
   console.log('   - DATABASE_URL');
   console.log('   - JWT_SECRET');
-  console.log('   - OSS_ACCESS_KEY_ID / OSS_ACCESS_KEY_SECRET（默认）');
+  console.log('   - OSS_ACCESS_KEY_ID / OSS_ACCESS_KEY_SECRET');
   console.log('   - OSS_REGION');
-  console.log('   - OSS_BUCKET');
-  console.log('   - 如果仍使用 AWS S3，可继续配置 AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION / AWS_S3_BUCKET\n');
+  console.log('   - OSS_BUCKET\n');
 }
 
 main().catch(console.error);

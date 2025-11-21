@@ -14,21 +14,11 @@ const dotenv = require('dotenv');
 dotenv.config({ path: path.resolve(__dirname, '../backend/.env') });
 dotenv.config();
 
-const getEnv = (...keys) => {
-  for (const key of keys) {
-    const value = process.env[key];
-    if (value) {
-      return value;
-    }
-  }
-  return undefined;
-};
-
-const accessKeyId = getEnv('OSS_ACCESS_KEY_ID', 'AWS_ACCESS_KEY_ID');
-const accessKeySecret = getEnv('OSS_ACCESS_KEY_SECRET', 'AWS_SECRET_ACCESS_KEY');
-const region = getEnv('OSS_REGION', 'AWS_REGION');
-const bucket = getEnv('OSS_BUCKET', 'AWS_S3_BUCKET');
-const endpoint = getEnv('OSS_ENDPOINT', 'AWS_S3_ENDPOINT');
+const accessKeyId = process.env.OSS_ACCESS_KEY_ID;
+const accessKeySecret = process.env.OSS_ACCESS_KEY_SECRET;
+const region = process.env.OSS_REGION;
+const bucket = process.env.OSS_BUCKET;
+const endpoint = process.env.OSS_ENDPOINT;
 
 function ensureEnv() {
   const missing = [];
@@ -40,7 +30,6 @@ function ensureEnv() {
   if (missing.length) {
     console.error('❌ 缺少以下 OSS 环境变量：');
     missing.forEach((item) => console.error(`   - ${item}`));
-    console.error('\n提示：如仍在使用 AWS S3，可保留旧的 AWS_* 变量，脚本会自动兼容。');
     process.exit(1);
   }
 }
