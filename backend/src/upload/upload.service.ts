@@ -47,34 +47,84 @@ export class UploadService {
         normalizedContentType = normalizedContentType.split(';')[0].trim();
       }
 
-      const signatureOptions: OSS.SignatureUrlOptions = {
-        method: 'PUT',
-        expires: 300,
-      };
+      // 使用 POST 表单上传方式，避免 CORS 预检请求问题
+      // POST 表单上传使用 multipart/form-data，通常不会触发 OPTIONS 预检请求
+      const finalContentType = normalizedContentType || 'application/octet-stream';
 
-      if (normalizedContentType) {
-        signatureOptions.headers = {
-          'Content-Type': normalizedContentType,
+      try {
+        // 生成 POST 表单上传的签名
+        const policy = this.ossClient.calculatePostSignature({
+          expiration: new Date(Date.now() + 300 * 1000).toISOString(),
+          conditions: [
+            ['content-length-range', 0, 10 * 1024 * 1024], // 最大 10MB
+            ['eq', '$key', key],
+            ['eq', '$Content-Type', finalContentType],
+          ],
+        });
+
+        const formData = {
+          key,
+          policy: policy.policy,
+          OSSAccessKeyId: this.ossClient.options.accessKeyId,
+          signature: policy.signature,
+          'Content-Type': finalContentType,
+        };
+
+        // 构建上传地址
+        const uploadEndpoint = this.endpoint && this.endpoint.trim()
+          ? this.endpoint.replace(/^https?:\/\//, '')
+          : `${this.bucket}.${this.region}.aliyuncs.com`;
+        const action = `https://${uploadEndpoint}`;
+
+        console.log('✅ 生成 OSS POST 表单签名成功', {
+          bucket: this.bucket,
+          key,
+          contentType: finalContentType,
+          region: this.region,
+        });
+
+        return {
+          formData,
+          action,
+          key,
+          url: this.buildPublicUrl(key),
+          expectedContentType: finalContentType,
+          usePostForm: true, // 标记使用 POST 表单上传
+        };
+      } catch (error: any) {
+        console.error('❌ 生成 POST 表单签名失败，回退到 PUT 方法', error);
+        
+        // 如果 POST 表单签名失败，回退到原来的 PUT 方法
+        const signatureOptions: OSS.SignatureUrlOptions = {
+          method: 'PUT',
+          expires: 300,
+        };
+
+        if (normalizedContentType) {
+          signatureOptions.headers = {
+            'Content-Type': normalizedContentType,
+          };
+        }
+
+        const presignedUrl = this.ossClient.signatureUrl(key, {
+          ...signatureOptions,
+        });
+
+        console.log('✅ 生成 OSS 预签名 URL 成功（PUT 方法）', {
+          bucket: this.bucket,
+          key,
+          contentType: normalizedContentType || '未指定',
+          region: this.region,
+        });
+
+        return {
+          presignedUrl,
+          key,
+          url: this.buildPublicUrl(key),
+          expectedContentType: normalizedContentType || finalContentType,
+          usePostForm: false,
         };
       }
-
-      const presignedUrl = this.ossClient.signatureUrl(key, {
-        ...signatureOptions,
-      });
-
-      console.log('✅ 生成 OSS 预签名 URL 成功', {
-        bucket: this.bucket,
-        key,
-        contentType: normalizedContentType || '未指定',
-        region: this.region,
-      });
-
-      return {
-        presignedUrl,
-        key,
-        url: this.buildPublicUrl(key),
-        expectedContentType: normalizedContentType,
-      };
     } catch (error: any) {
       console.error('❌ 生成 OSS 预签名 URL 失败', {
         message: error?.message || error,
@@ -132,7 +182,7 @@ export class UploadService {
 
       try {
         const url = this.ossClient.signatureUrl('diagnose/test.txt', {
-          method: 'PUT',
+          method: 'POST',
           expires: 60,
           headers: { 'Content-Type': 'text/plain' },
         });

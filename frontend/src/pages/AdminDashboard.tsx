@@ -143,13 +143,16 @@ const AdminDashboard: React.FC = () => {
         
         const {
           presignedUrl,
+          formData: postFormData,
+          action: postAction,
           url,
           useBase64,
           expectedContentType,
+          usePostForm,
         } = response.data
         
         // 如果后端返回 useBase64，使用 Base64 编码（临时方案）
-        if (useBase64 || !presignedUrl) {
+        if (useBase64) {
           return new Promise<string>((resolve, reject) => {
             const reader = new FileReader()
             reader.onload = (e) => {
@@ -161,6 +164,58 @@ const AdminDashboard: React.FC = () => {
           })
         }
         
+        // 优先使用 POST 表单上传（避免 CORS 预检请求）
+        if (usePostForm && postFormData && postAction) {
+          console.log('📤 使用 POST 表单上传:', {
+            filename: file.name,
+            contentType: file.type,
+            size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
+            action: postAction,
+          });
+
+          const uploadStartTime = Date.now();
+          
+          // 构建 FormData
+          const formData = new FormData();
+          formData.append('key', postFormData.key);
+          formData.append('policy', postFormData.policy);
+          formData.append('OSSAccessKeyId', postFormData.OSSAccessKeyId);
+          formData.append('signature', postFormData.signature);
+          formData.append('Content-Type', postFormData['Content-Type']);
+          formData.append('file', file);
+
+          const uploadResponse = await fetch(postAction, {
+            method: 'POST',
+            body: formData,
+            credentials: 'omit',
+          });
+
+          const uploadDuration = Date.now() - uploadStartTime;
+
+          if (!uploadResponse.ok) {
+            const errorText = await uploadResponse.text().catch(() => '无法读取错误信息');
+            console.error('❌ POST 表单上传失败:', {
+              status: uploadResponse.status,
+              statusText: uploadResponse.statusText,
+              error: errorText,
+              filename: file.name,
+              duration: `${uploadDuration}ms`,
+            });
+            throw new Error(`上传失败: ${uploadResponse.status} ${uploadResponse.statusText}`);
+          }
+
+          console.log('✅ POST 表单上传成功:', {
+            url,
+            filename: file.name,
+            size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
+            duration: `${uploadDuration}ms`,
+            timestamp: new Date().toISOString(),
+          });
+
+          return url;
+        }
+        
+        // 回退到 PUT 方法（如果 POST 表单上传不可用）
         if (!presignedUrl || !url) {
           throw new Error('上传地址格式不正确')
         }
@@ -230,8 +285,12 @@ const AdminDashboard: React.FC = () => {
         }
         
         // 检查 4: 准备请求头（只设置 Content-Type，不添加任何其他头）
-        const effectiveContentType =
+        // 规范化 Content-Type：移除 charset 参数，确保与后端签名一致
+        const rawContentType =
           file.type || signedContentType || 'application/octet-stream';
+        // 移除 charset 参数，只保留主类型和子类型
+        // 例如: "text/plain; charset=utf-8" -> "text/plain"
+        const effectiveContentType = rawContentType.split(';')[0].trim();
         const requestHeaders: HeadersInit = {
           'Content-Type': effectiveContentType,
         };
@@ -243,7 +302,7 @@ const AdminDashboard: React.FC = () => {
           throw new Error('上传时只能设置 Content-Type 请求头，不能添加其他请求头');
         }
         
-        console.log('📋 请求详情:', {
+        console.log('📋 请求详情（PUT 方法）:', {
           method: 'PUT',
           url: presignedUrl.substring(0, 150) + '...',
           headers: requestHeaders,
@@ -254,6 +313,7 @@ const AdminDashboard: React.FC = () => {
         });
         
         // 使用 fetch 直接上传（不使用 axios，避免自动添加请求头）
+        // 使用 PUT 方法（回退方案）
         const uploadResponse = await fetch(presignedUrl, {
           method: 'PUT',
           body: file,

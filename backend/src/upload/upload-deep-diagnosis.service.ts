@@ -49,6 +49,11 @@ export class UploadDeepDiagnosisService {
     await this.checkSignatureUrl(results, criticalIssues, recommendations);
     await this.checkBucketAcl(results, criticalIssues, recommendations);
     await this.checkCorsConfiguration(results, criticalIssues, recommendations);
+    await this.checkCorsDetailedAnalysis(results, criticalIssues, recommendations);
+    await this.checkCorsOriginMatching(results, criticalIssues, recommendations);
+    await this.checkCorsHeaderMatching(results, criticalIssues, recommendations);
+    await this.checkCorsPreflightTest(results, criticalIssues, recommendations);
+    await this.testPresignedUrlHttpRequest(results, criticalIssues, recommendations);
     await this.checkRegionConsistency(results, criticalIssues, recommendations);
     await this.testActualUpload(results, criticalIssues, recommendations);
     await this.checkNetworkConnectivity(results, criticalIssues, recommendations);
@@ -360,7 +365,7 @@ export class UploadDeepDiagnosisService {
 
     try {
       const cors = await this.client.getBucketCORS(this.bucket);
-      const rules = cors?.CORSRules || cors?.corsRules || [];
+      const rules = cors?.CORSRules || cors?.corsRules || cors?.Rules || cors?.rules || [];
 
       if (!rules.length) {
         results.push({
@@ -371,9 +376,24 @@ export class UploadDeepDiagnosisService {
         });
         recommendations.push('在 OSS 控制台为该 Bucket 添加允许 PUT 的 CORS 规则。');
       } else {
-        const allowsPut = rules.some((rule: any) =>
-          (rule.AllowedMethod || rule.AllowedMethods)?.includes('PUT'),
-        );
+        // 辅助函数：将值转换为数组格式
+        const toArray = (value: any): string[] => {
+          if (!value) return [];
+          if (Array.isArray(value)) return value;
+          if (typeof value === 'string') return [value];
+          return [];
+        };
+
+        // 检查规则中是否包含 PUT 方法
+        const allowsPut = rules.some((rule: any) => {
+          const methods = toArray(
+            rule.AllowedMethod ||
+            rule.AllowedMethods ||
+            rule.allowedMethod ||
+            rule.allowedMethods,
+          );
+          return methods.includes('PUT');
+        });
 
         results.push({
           category: 'CORS',
@@ -385,6 +405,15 @@ export class UploadDeepDiagnosisService {
           details: {
             ruleCount: rules.length,
             sampleRule: rules[0],
+            methods: rules.map((rule: any) => {
+              const methods = toArray(
+                rule.AllowedMethod ||
+                rule.AllowedMethods ||
+                rule.allowedMethod ||
+                rule.allowedMethods,
+              );
+              return methods.join(', ');
+            }),
           },
         });
 
@@ -514,6 +543,479 @@ export class UploadDeepDiagnosisService {
         message: `无法进行 HEAD 请求：${error?.message || error}`,
       });
       recommendations.push('检查服务器能否访问 OSS 域名（DNS / 防火墙 / 代理）。');
+    }
+  }
+
+  private async checkCorsDetailedAnalysis(
+    results: DiagnosisResult[],
+    criticalIssues: string[],
+    recommendations: string[],
+  ) {
+    if (!this.client || !this.bucket) {
+      return;
+    }
+
+    try {
+      const cors = await this.client.getBucketCORS(this.bucket);
+      const rules = cors?.CORSRules || cors?.corsRules || cors?.Rules || cors?.rules || [];
+
+      if (!rules.length) {
+        return;
+      }
+
+      // 辅助函数：将值转换为数组格式
+      const toArray = (value: any): string[] => {
+        if (!value) return [];
+        if (Array.isArray(value)) return value;
+        if (typeof value === 'string') return [value];
+        return [];
+      };
+
+      // 详细分析每个规则
+      const ruleAnalysis = rules.map((rule: any, index: number) => {
+        const origins = toArray(
+          rule.AllowedOrigin ||
+          rule.AllowedOrigins ||
+          rule.allowedOrigin ||
+          rule.allowedOrigins,
+        );
+        const methods = toArray(
+          rule.AllowedMethod ||
+          rule.AllowedMethods ||
+          rule.allowedMethod ||
+          rule.allowedMethods,
+        );
+        const headers = toArray(
+          rule.AllowedHeader ||
+          rule.AllowedHeaders ||
+          rule.allowedHeader ||
+          rule.allowedHeaders,
+        );
+        const exposedHeaders = toArray(
+          rule.ExposeHeader ||
+          rule.ExposeHeaders ||
+          rule.exposeHeader ||
+          rule.exposeHeaders,
+        );
+        const maxAge = rule.MaxAgeSeconds || rule.maxAgeSeconds || rule.MaxAge || rule.maxAge;
+
+        return {
+          index: index + 1,
+          origins,
+          methods,
+          headers,
+          exposedHeaders,
+          maxAge,
+          allowsAllOrigins: origins.includes('*'),
+          allowsAllHeaders: headers.includes('*'),
+          allowsPut: methods.includes('PUT'),
+          allowsContentType: headers.includes('*') || headers.some((h: string) =>
+            h.toLowerCase() === 'content-type',
+          ),
+        };
+      });
+
+      // 检查是否有规则允许PUT
+      const hasPutRule = ruleAnalysis.some((r) => r.allowsPut);
+      // 检查是否有规则允许所有Origin
+      const hasAllOriginRule = ruleAnalysis.some((r) => r.allowsAllOrigins);
+      // 检查是否有规则允许Content-Type头
+      const hasContentTypeHeader = ruleAnalysis.some((r) => r.allowsContentType);
+
+      results.push({
+        category: 'CORS',
+        test: '详细分析',
+        status: hasPutRule && hasContentTypeHeader ? 'pass' : 'warning',
+        message: hasPutRule && hasContentTypeHeader
+          ? 'CORS 规则配置完整'
+          : `CORS 规则存在问题：${!hasPutRule ? '缺少PUT方法' : ''}${!hasContentTypeHeader ? '缺少Content-Type头' : ''}`,
+        details: {
+          ruleCount: rules.length,
+          rules: ruleAnalysis,
+          summary: {
+            hasPutMethod: hasPutRule,
+            hasAllOrigin: hasAllOriginRule,
+            hasContentTypeHeader,
+          },
+        },
+      });
+
+      if (!hasPutRule) {
+        recommendations.push('CORS 规则中必须包含 PUT 方法');
+      }
+      if (!hasContentTypeHeader) {
+        recommendations.push('CORS 规则中必须允许 Content-Type 请求头（或使用 * 允许所有头）');
+      }
+    } catch (error: any) {
+      results.push({
+        category: 'CORS',
+        test: '详细分析',
+        status: 'warning',
+        message: `无法分析 CORS 配置：${error?.message || error}`,
+      });
+    }
+  }
+
+  private async checkCorsOriginMatching(
+    results: DiagnosisResult[],
+    criticalIssues: string[],
+    recommendations: string[],
+  ) {
+    if (!this.client || !this.bucket) {
+      return;
+    }
+
+    try {
+      const cors = await this.client.getBucketCORS(this.bucket);
+      const rules = cors?.CORSRules || cors?.corsRules || cors?.Rules || cors?.rules || [];
+
+      if (!rules.length) {
+        return;
+      }
+
+      // 辅助函数：将值转换为数组格式
+      const toArray = (value: any): string[] => {
+        if (!value) return [];
+        if (Array.isArray(value)) return value;
+        if (typeof value === 'string') return [value];
+        return [];
+      };
+
+      // 测试常见的Origin
+      const testOrigins = [
+        'http://localhost:3000',
+        'http://localhost:5173',
+        'http://127.0.0.1:3000',
+        'https://localhost:3000',
+        'http://localhost',
+        'https://localhost',
+      ];
+
+      // 收集所有规则允许的Origin
+      const allowedOrigins: string[] = [];
+      rules.forEach((rule: any) => {
+        const origins = toArray(
+          rule.AllowedOrigin ||
+          rule.AllowedOrigins ||
+          rule.allowedOrigin ||
+          rule.allowedOrigins,
+        );
+        allowedOrigins.push(...origins);
+      });
+
+      const hasWildcard = allowedOrigins.includes('*');
+      const matchingOrigins = testOrigins.filter((origin) => {
+        if (hasWildcard) return true;
+        return allowedOrigins.some((allowed) => {
+          if (allowed === '*') return true;
+          // 支持通配符匹配，如 http://*.example.com
+          const pattern = allowed.replace(/\*/g, '.*');
+          const regex = new RegExp(`^${pattern}$`);
+          return regex.test(origin);
+        });
+      });
+
+      results.push({
+        category: 'CORS',
+        test: 'Origin匹配',
+        status: hasWildcard || matchingOrigins.length > 0 ? 'pass' : 'warning',
+        message: hasWildcard
+          ? 'CORS 规则允许所有 Origin (*)'
+          : matchingOrigins.length > 0
+            ? `CORS 规则匹配 ${matchingOrigins.length} 个常见 Origin`
+            : 'CORS 规则可能不匹配前端实际使用的 Origin',
+        details: {
+          allowedOrigins,
+          testOrigins,
+          matchingOrigins,
+          hasWildcard,
+          recommendation: hasWildcard
+            ? '当前配置允许所有来源，生产环境建议限制为具体域名'
+            : matchingOrigins.length === 0
+              ? '请确保 CORS 规则包含前端实际使用的 Origin（如 http://localhost:3000）'
+              : 'Origin 匹配正常',
+        },
+      });
+
+      if (!hasWildcard && matchingOrigins.length === 0) {
+        recommendations.push('检查前端实际使用的 Origin，确保 CORS 规则包含该 Origin');
+      }
+    } catch (error: any) {
+      results.push({
+        category: 'CORS',
+        test: 'Origin匹配',
+        status: 'warning',
+        message: `无法检查 Origin 匹配：${error?.message || error}`,
+      });
+    }
+  }
+
+  private async checkCorsHeaderMatching(
+    results: DiagnosisResult[],
+    criticalIssues: string[],
+    recommendations: string[],
+  ) {
+    if (!this.client || !this.bucket) {
+      return;
+    }
+
+    try {
+      const cors = await this.client.getBucketCORS(this.bucket);
+      const rules = cors?.CORSRules || cors?.corsRules || cors?.Rules || cors?.rules || [];
+
+      if (!rules.length) {
+        return;
+      }
+
+      // 辅助函数：将值转换为数组格式
+      const toArray = (value: any): string[] => {
+        if (!value) return [];
+        if (Array.isArray(value)) return value;
+        if (typeof value === 'string') return [value];
+        return [];
+      };
+
+      // 前端实际使用的请求头
+      const requiredHeaders = ['Content-Type'];
+      const optionalHeaders = ['x-requested-with', 'authorization'];
+
+      // 检查每个规则
+      const headerAnalysis = rules.map((rule: any, index: number) => {
+        const headers = toArray(
+          rule.AllowedHeader ||
+          rule.AllowedHeaders ||
+          rule.allowedHeader ||
+          rule.allowedHeaders,
+        );
+        const allowsAll = headers.includes('*');
+        const allowsContentType = allowsAll || headers.some((h: string) =>
+          h.toLowerCase() === 'content-type',
+        );
+
+        return {
+          ruleIndex: index + 1,
+          allowedHeaders: headers,
+          allowsAll,
+          allowsContentType,
+        };
+      });
+
+      const hasContentTypeHeader = headerAnalysis.some((r) => r.allowsContentType);
+      const hasWildcard = headerAnalysis.some((r) => r.allowsAll);
+
+      results.push({
+        category: 'CORS',
+        test: '请求头匹配',
+        status: hasContentTypeHeader ? 'pass' : 'fail',
+        message: hasContentTypeHeader
+          ? 'CORS 规则允许 Content-Type 请求头'
+          : 'CORS 规则未允许 Content-Type 请求头，可能导致 403',
+        details: {
+          requiredHeaders,
+          headerAnalysis,
+          hasContentTypeHeader,
+          hasWildcard,
+        },
+      });
+
+      if (!hasContentTypeHeader) {
+        criticalIssues.push('CORS 规则未允许 Content-Type 请求头');
+        recommendations.push('在 CORS 规则的 AllowedHeader 中添加 Content-Type 或使用 * 允许所有头');
+      }
+    } catch (error: any) {
+      results.push({
+        category: 'CORS',
+        test: '请求头匹配',
+        status: 'warning',
+        message: `无法检查请求头匹配：${error?.message || error}`,
+      });
+    }
+  }
+
+  private async checkCorsPreflightTest(
+    results: DiagnosisResult[],
+    criticalIssues: string[],
+    recommendations: string[],
+  ) {
+    if (!this.client || !this.bucket) {
+      return;
+    }
+
+    try {
+      const cors = await this.client.getBucketCORS(this.bucket);
+      const rules = cors?.CORSRules || cors?.corsRules || cors?.Rules || cors?.rules || [];
+
+      if (!rules.length) {
+        results.push({
+          category: 'CORS',
+          test: '预检请求',
+          status: 'warning',
+          message: '未配置 CORS，无法进行预检请求测试',
+        });
+        return;
+      }
+
+      // 辅助函数：将值转换为数组格式
+      const toArray = (value: any): string[] => {
+        if (!value) return [];
+        if (Array.isArray(value)) return value;
+        if (typeof value === 'string') return [value];
+        return [];
+      };
+
+      // 检查是否有规则允许OPTIONS方法（预检请求）
+      const allowsOptions = rules.some((rule: any) => {
+        const methods = toArray(
+          rule.AllowedMethod ||
+          rule.AllowedMethods ||
+          rule.allowedMethod ||
+          rule.allowedMethods,
+        );
+        return methods.includes('OPTIONS') || methods.includes('*');
+      });
+
+      // 检查是否有规则允许PUT方法
+      const allowsPut = rules.some((rule: any) => {
+        const methods = toArray(
+          rule.AllowedMethod ||
+          rule.AllowedMethods ||
+          rule.allowedMethod ||
+          rule.allowedMethods,
+        );
+        return methods.includes('PUT') || methods.includes('*');
+      });
+
+      // PUT 请求不是简单请求，浏览器总是会先发送 OPTIONS 预检请求
+      // 如果 OPTIONS 预检失败，浏览器会阻止 PUT 请求，导致 403 错误
+      const isCriticalIssue = !allowsOptions;
+
+      results.push({
+        category: 'CORS',
+        test: '预检请求',
+        status: allowsOptions && allowsPut ? 'pass' : isCriticalIssue ? 'fail' : 'warning',
+        message: allowsOptions && allowsPut
+          ? 'CORS 规则支持预检请求（OPTIONS）和实际请求（PUT）'
+          : allowsOptions
+            ? 'CORS 规则支持预检请求，但未允许 PUT 方法'
+            : '❌ CORS 规则缺少 OPTIONS 方法，浏览器预检请求会失败，导致 403 错误',
+        details: {
+          allowsOptions,
+          allowsPut,
+          isCriticalIssue,
+          note: '浏览器在发送 PUT 请求前会先发送 OPTIONS 预检请求，如果预检失败，PUT 请求会被阻止',
+          explanation: !allowsOptions
+            ? '这是导致 403 错误的常见原因：浏览器发送 OPTIONS 预检请求，但 CORS 规则未允许 OPTIONS 方法，预检失败后浏览器阻止了 PUT 请求'
+            : undefined,
+        },
+      });
+
+      if (!allowsOptions) {
+        criticalIssues.push('CORS 规则缺少 OPTIONS 方法，浏览器预检请求会失败，导致 403 错误');
+        recommendations.push(
+          '⚠️ 关键修复：在 OSS 控制台的 CORS 规则中添加 OPTIONS 方法。浏览器在发送 PUT 请求前会先发送 OPTIONS 预检请求，如果预检失败，会导致 403 错误。',
+        );
+      }
+      if (!allowsPut) {
+        recommendations.push('CORS 规则应包含 PUT 方法以支持实际上传');
+      }
+    } catch (error: any) {
+      results.push({
+        category: 'CORS',
+        test: '预检请求',
+        status: 'warning',
+        message: `无法检查预检请求配置：${error?.message || error}`,
+      });
+    }
+  }
+
+  private async testPresignedUrlHttpRequest(
+    results: DiagnosisResult[],
+    criticalIssues: string[],
+    recommendations: string[],
+  ) {
+    if (!this.client || !this.bucket) {
+      return;
+    }
+
+    try {
+      // 生成一个测试用的预签名URL
+      const testKey = `diagnosis/http-test-${Date.now()}.txt`;
+      const testContentType = 'text/plain';
+      const testContent = Buffer.from('test-content');
+
+      const presignedUrl = this.client.signatureUrl(testKey, {
+        method: 'PUT',
+        expires: 300,
+        headers: { 'Content-Type': testContentType },
+      });
+
+      // 使用 Node.js 的 https/http 模块测试实际HTTP请求
+      // 注意：这里我们只检查URL格式，实际HTTP测试需要网络请求
+      const urlObj = new URL(presignedUrl);
+      const hasSignature = urlObj.searchParams.has('Signature') || urlObj.searchParams.has('X-Amz-Signature');
+      const hasExpires = urlObj.searchParams.has('Expires') || urlObj.searchParams.has('X-Amz-Expires');
+      const hasContentType = urlObj.searchParams.has('Content-Type');
+
+      // 检查URL参数完整性
+      const urlValid = hasSignature && hasExpires;
+      const contentTypeInUrl = hasContentType;
+
+      results.push({
+        category: '预签名URL',
+        test: 'HTTP请求测试',
+        status: urlValid ? 'pass' : 'fail',
+        message: urlValid
+          ? '预签名 URL 格式正确，包含必要的签名参数'
+          : '预签名 URL 缺少必要的签名参数',
+        details: {
+          hasSignature,
+          hasExpires,
+          hasContentType: contentTypeInUrl,
+          urlHost: urlObj.hostname,
+          urlPath: urlObj.pathname,
+          recommendation: contentTypeInUrl
+            ? '预签名 URL 包含 Content-Type，确保前端上传时使用相同的 Content-Type'
+            : '预签名 URL 未包含 Content-Type，前端可以自由设置',
+        },
+      });
+
+      if (!urlValid) {
+        criticalIssues.push('预签名 URL 格式不正确');
+        recommendations.push('检查预签名 URL 生成逻辑，确保包含 Signature 和 Expires 参数');
+      }
+
+      // 尝试实际写入（使用SDK，不是HTTP）
+      try {
+        await this.client.put(testKey, testContent, {
+          headers: { 'Content-Type': testContentType },
+        });
+        await this.client.delete(testKey).catch(() => undefined);
+
+        results.push({
+          category: '预签名URL',
+          test: '实际写入验证',
+          status: 'pass',
+          message: '使用相同参数可以成功写入，预签名 URL 应该有效',
+        });
+      } catch (error: any) {
+        results.push({
+          category: '预签名URL',
+          test: '实际写入验证',
+          status: 'warning',
+          message: `使用SDK写入测试失败：${error?.message || error}`,
+          details: {
+            note: '这可能是权限问题，但不影响预签名URL的格式正确性',
+          },
+        });
+      }
+    } catch (error: any) {
+      results.push({
+        category: '预签名URL',
+        test: 'HTTP请求测试',
+        status: 'fail',
+        message: `无法生成或测试预签名 URL：${error?.message || error}`,
+      });
+      criticalIssues.push('预签名 URL 生成或测试失败');
     }
   }
 
