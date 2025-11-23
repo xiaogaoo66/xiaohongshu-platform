@@ -13,7 +13,7 @@ export class ContentService {
   ) {}
 
   /**
-   * 从 OSS/S3 URL 中提取对象 key
+   * 从 OSS URL 中提取对象 key
    * 支持虚拟主机、路径风格以及自定义域名（与 OSS_PUBLIC_BASE_URL 一致）
    */
   private extractStorageKey(url: string): string | null {
@@ -42,14 +42,12 @@ export class ContentService {
       }
 
       const looksLikeStorageHost =
-        hostname.includes('amazonaws.com') ||
-        hostname.includes('.s3.') ||
         hostname.includes('aliyuncs.com') ||
         hostname.includes('.oss-') ||
         whitelistedHosts.includes(hostname);
 
       if (!looksLikeStorageHost) {
-        console.warn(`⚠️ URL 不属于 OSS/S3 域名，跳过删除: ${url}`);
+        console.warn(`⚠️ URL 不属于 OSS 域名，跳过删除: ${url}`);
         return null;
       }
 
@@ -82,7 +80,7 @@ export class ContentService {
   }
 
   /**
-   * 删除内容关联的存储（OSS/S3）图片文件
+   * 删除内容关联的存储（OSS）图片文件
    */
   private async deleteStorageImages(images: any): Promise<void> {
     if (!images || !Array.isArray(images)) {
@@ -161,7 +159,7 @@ export class ContentService {
   async remove(id: string) {
     const content = await this.findOne(id);
     
-    // 先删除 OSS/S3 中的图片文件
+    // 先删除 OSS 中的图片文件
     if (content.images) {
       await this.deleteStorageImages(content.images);
     }
@@ -178,7 +176,7 @@ export class ContentService {
     }
     
     try {
-      // 先查询要删除的内容，以便删除S3文件
+      // 先查询要删除的内容，以便删除OSS文件
       const contentsToDelete = await this.prisma.content.findMany({
         where: {
           id: {
@@ -187,7 +185,7 @@ export class ContentService {
         },
       });
 
-      // 删除所有关联的 OSS/S3 图片文件
+      // 删除所有关联的 OSS 图片文件
       for (const content of contentsToDelete) {
         if (content.images) {
           await this.deleteStorageImages(content.images);
@@ -227,7 +225,7 @@ export class ContentService {
         throw new NotFoundException('没有可领取的内容');
       }
 
-      // 标记为已领取，但不删除数据库记录和S3图片
+      // 标记为已领取，但不删除数据库记录和OSS图片
       // 用户查看完内容后，图片加载完成时会调用 confirmClaimed 真正删除
       const updatedContent = await tx.content.update({
         where: { id: content.id },
@@ -243,7 +241,7 @@ export class ContentService {
 
   /**
    * 确认已领取的内容（用户查看完后调用）
-   * 真正删除数据库记录和S3图片
+   * 真正删除数据库记录和OSS图片
    */
   async confirmClaimed(contentId: string) {
     // 参数验证：在调用 Prisma 之前检查
@@ -275,7 +273,7 @@ export class ContentService {
       images: content.images,
     });
 
-    // 先删除 OSS/S3 中的图片文件
+    // 先删除 OSS 中的图片文件
     if (imagesArray.length > 0) {
       console.log(`🗑️ 开始删除存储图片...`);
       await this.deleteStorageImages(imagesArray);

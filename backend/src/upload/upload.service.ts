@@ -62,6 +62,28 @@ export class UploadService {
           ],
         });
 
+        // 验证 policy 返回值
+        if (!policy) {
+          throw new Error('calculatePostSignature 返回 null 或 undefined');
+        }
+
+        if (!policy.policy) {
+          throw new Error('calculatePostSignature 返回的 policy.policy 为 undefined');
+        }
+
+        if (!policy.signature) {
+          console.error('❌ calculatePostSignature 返回的 signature 为 undefined', {
+            policyKeys: Object.keys(policy),
+            policyType: typeof policy,
+            policyValue: JSON.stringify(policy).substring(0, 200),
+          });
+          throw new Error('calculatePostSignature 返回的 policy.signature 为 undefined，请检查 OSS AccessKey Secret 配置');
+        }
+
+        if (!this.ossClient.options.accessKeyId) {
+          throw new Error('OSS 客户端 accessKeyId 未配置');
+        }
+
         const formData = {
           key,
           policy: policy.policy,
@@ -69,6 +91,11 @@ export class UploadService {
           signature: policy.signature,
           'Content-Type': finalContentType,
         };
+
+        // 验证 formData 完整性
+        if (!formData.signature || formData.signature === 'undefined') {
+          throw new Error(`签名验证失败：signature 为 ${formData.signature}`);
+        }
 
         // 构建上传地址
         const uploadEndpoint = this.endpoint && this.endpoint.trim()
@@ -81,6 +108,10 @@ export class UploadService {
           key,
           contentType: finalContentType,
           region: this.region,
+          signatureLength: formData.signature?.length || 0,
+          hasSignature: !!formData.signature,
+          hasPolicy: !!formData.policy,
+          hasAccessKeyId: !!formData.OSSAccessKeyId,
         });
 
         return {

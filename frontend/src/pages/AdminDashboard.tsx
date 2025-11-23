@@ -166,11 +166,32 @@ const AdminDashboard: React.FC = () => {
         
         // 优先使用 POST 表单上传（避免 CORS 预检请求）
         if (usePostForm && postFormData && postAction) {
+          // 验证必要字段
+          if (!postFormData.signature || postFormData.signature === 'undefined') {
+            console.error('❌ POST 表单签名缺失:', {
+              hasSignature: !!postFormData.signature,
+              signatureValue: postFormData.signature,
+              formDataKeys: Object.keys(postFormData),
+            });
+            throw new Error('服务器返回的签名信息不完整，请检查后端 OSS 配置');
+          }
+
+          if (!postFormData.policy || !postFormData.OSSAccessKeyId || !postFormData.key) {
+            console.error('❌ POST 表单数据不完整:', {
+              hasPolicy: !!postFormData.policy,
+              hasAccessKeyId: !!postFormData.OSSAccessKeyId,
+              hasKey: !!postFormData.key,
+            });
+            throw new Error('服务器返回的上传信息不完整');
+          }
+
           console.log('📤 使用 POST 表单上传:', {
             filename: file.name,
             contentType: file.type,
             size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
             action: postAction,
+            signatureLength: postFormData.signature?.length || 0,
+            hasSignature: !!postFormData.signature,
           });
 
           const uploadStartTime = Date.now();
@@ -220,7 +241,7 @@ const AdminDashboard: React.FC = () => {
           throw new Error('上传地址格式不正确')
         }
         
-        // 上传到 OSS（兼容 S3 旧逻辑）
+        // 上传到 OSS
         // 重要：预签名URL的签名是基于特定的请求头和参数生成的
         // 必须确保上传时的请求头与生成签名时一致
         
@@ -246,15 +267,7 @@ const AdminDashboard: React.FC = () => {
           bucket: urlObj.hostname.split('.')[0],
           key: urlObj.pathname.substring(1),
           presignedUrlParams: {
-            // AWS 旧参数（保持兼容）
-            'X-Amz-Algorithm': urlParams['X-Amz-Algorithm'],
-            'X-Amz-Credential': urlParams['X-Amz-Credential']
-              ? `${urlParams['X-Amz-Credential']?.substring(0, 20)}...`
-              : undefined,
-            'X-Amz-Date': urlParams['X-Amz-Date'],
-            'X-Amz-Expires': urlParams['X-Amz-Expires'],
-            'X-Amz-SignedHeaders': urlParams['X-Amz-SignedHeaders'],
-            // OSS 新参数
+            // OSS 参数
             OSSAccessKeyId: urlParams['OSSAccessKeyId']
               ? `${urlParams['OSSAccessKeyId']?.substring(0, 6)}***`
               : undefined,
