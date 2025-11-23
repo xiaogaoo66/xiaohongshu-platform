@@ -71,13 +71,17 @@ export class UploadService {
           throw new Error('calculatePostSignature 返回的 policy.policy 为 undefined');
         }
 
-        if (!policy.signature) {
+        // ali-oss 库返回的字段名可能是 Signature（大写）或 signature（小写）
+        const signature = policy.Signature || policy.signature;
+        if (!signature) {
           console.error('❌ calculatePostSignature 返回的 signature 为 undefined', {
             policyKeys: Object.keys(policy),
             policyType: typeof policy,
+            hasSignatureUpper: !!policy.Signature,
+            hasSignatureLower: !!policy.signature,
             policyValue: JSON.stringify(policy).substring(0, 200),
           });
-          throw new Error('calculatePostSignature 返回的 policy.signature 为 undefined，请检查 OSS AccessKey Secret 配置');
+          throw new Error('calculatePostSignature 返回的 signature 为 undefined，请检查 OSS AccessKey Secret 配置');
         }
 
         if (!this.ossClient.options.accessKeyId) {
@@ -88,7 +92,7 @@ export class UploadService {
           key,
           policy: policy.policy,
           OSSAccessKeyId: this.ossClient.options.accessKeyId,
-          signature: policy.signature,
+          signature: signature, // 使用兼容大小写的签名值
           'Content-Type': finalContentType,
         };
 
@@ -98,9 +102,20 @@ export class UploadService {
         }
 
         // 构建上传地址
-        const uploadEndpoint = this.endpoint && this.endpoint.trim()
-          ? this.endpoint.replace(/^https?:\/\//, '')
-          : `${this.bucket}.${this.region}.aliyuncs.com`;
+        // POST 表单上传的 action 必须是 https://{bucket}.{region}.aliyuncs.com
+        // 如果设置了自定义 endpoint，需要确保包含 bucket 名称
+        let uploadEndpoint: string;
+        if (this.endpoint && this.endpoint.trim()) {
+          const cleanEndpoint = this.endpoint.replace(/^https?:\/\//, '');
+          // 如果 endpoint 不包含 bucket 名称，添加 bucket
+          if (!cleanEndpoint.startsWith(`${this.bucket}.`)) {
+            uploadEndpoint = `${this.bucket}.${cleanEndpoint}`;
+          } else {
+            uploadEndpoint = cleanEndpoint;
+          }
+        } else {
+          uploadEndpoint = `${this.bucket}.${this.region}.aliyuncs.com`;
+        }
         const action = `https://${uploadEndpoint}`;
 
         console.log('✅ 生成 OSS POST 表单签名成功', {

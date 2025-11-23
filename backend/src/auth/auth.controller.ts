@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, Request } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Request, HttpException, HttpStatus } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LocalAuthGuard } from './local-auth.guard';
 import { JwtAuthGuard } from './jwt-auth.guard';
@@ -16,7 +16,18 @@ export class AuthController {
 
   @Post('register')
   async register(@Body() loginDto: LoginDto) {
-    return this.authService.createAdmin(loginDto.username, loginDto.password);
+    try {
+      return await this.authService.createAdmin(loginDto.username, loginDto.password);
+    } catch (error) {
+      console.error('注册错误:', error);
+      if (error.code === 'P2002') {
+        throw new HttpException('用户名已存在', HttpStatus.CONFLICT);
+      }
+      throw new HttpException(
+        error.message || '注册失败',
+        error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
   }
 
   @UseGuards(JwtAuthGuard)
