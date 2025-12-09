@@ -25,4 +25,4 @@ COPY package*.json ./
 COPY prisma ./prisma
 
 EXPOSE 3000
-CMD ["sh","-c","npx prisma db push --accept-data-loss && node dist/main.js"]
+CMD ["sh","-c","npx prisma db push --accept-data-loss || echo 'Prisma push failed, continuing...'; node dist/main.js"]
